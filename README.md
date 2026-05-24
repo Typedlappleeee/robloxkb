@@ -12,8 +12,12 @@ sudo apt install python3-tk
 
 ## Lancer
 
+**Windows (le plus simple) :** double-clique sur **`Lancer_Macro.bat`**. Il vérifie Python, installe `pynput` tout seul et ouvre le menu.
+
+**Manuel :**
 ```bash
-python3 macro_recorder.py
+python macro_recorder.py    # Windows
+python3 macro_recorder.py   # Linux / Mac
 ```
 
 ## Utilisation
