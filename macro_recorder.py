@@ -170,10 +170,10 @@ class App(tk.Tk):
         frm1 = tk.Frame(self, bg=BG)
         frm1.pack(**PAD)
         self.btn_rec = tk.Button(frm1, text="⏺  Démarrer l'enregistrement",
-                                 command=self._start_rec, **BTN, **ACCENT)
+                                 command=self._start_rec, **{**BTN, **ACCENT})
         self.btn_rec.pack(side="left", padx=4)
         self.btn_stop_rec = tk.Button(frm1, text="⏹  Arrêter l'enregistrement",
-                                      command=self._stop_rec, **BTN, **RED,
+                                      command=self._stop_rec, **{**BTN, **RED},
                                       state="disabled")
         self.btn_stop_rec.pack(side="left", padx=4)
 
@@ -217,10 +217,10 @@ class App(tk.Tk):
         frm2 = tk.Frame(self, bg=BG)
         frm2.pack(**PAD)
         self.btn_play = tk.Button(frm2, text="▶  Lancer la macro",
-                                  command=self._start_play, **BTN, **BLUE)
+                                  command=self._start_play, **{**BTN, **BLUE})
         self.btn_play.pack(side="left", padx=4)
         self.btn_stop_play = tk.Button(frm2, text="⏹  Stopper la lecture",
-                                       command=self._stop_play, **BTN, **RED,
+                                       command=self._stop_play, **{**BTN, **RED},
                                        state="disabled")
         self.btn_stop_play.pack(side="left", padx=4)
 
@@ -230,8 +230,8 @@ class App(tk.Tk):
         small = dict(BTN, width=10, height=1)
         tk.Button(frm3, text="💾 Sauvegarder", command=self._save, **small).pack(side="left", padx=3)
         tk.Button(frm3, text="📂 Charger",     command=self._load, **small).pack(side="left", padx=3)
-        tk.Button(frm3, text="🗑 Effacer",      command=self._clear, **small,
-                  bg="#f38ba8", fg="#1e1e2e").pack(side="left", padx=3)
+        tk.Button(frm3, text="🗑 Effacer",      command=self._clear,
+                  **{**small, "bg": "#f38ba8", "fg": "#1e1e2e"}).pack(side="left", padx=3)
 
         tk.Label(self, text="F5 = Lancer  |  F6 = Stopper  |  F9 = Enregistrer  |  F10 = Stop enreg.",
                  bg=BG, fg="#45475a", font=("Segoe UI", 8)).pack(pady=(6, 12))
