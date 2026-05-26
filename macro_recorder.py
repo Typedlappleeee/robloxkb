@@ -149,41 +149,35 @@ class App(tk.Tk):
         RED    = {"bg": "#f38ba8", "fg": "#1e1e2e"}
         BLUE   = {"bg": "#89b4fa", "fg": "#1e1e2e"}
 
-        # Title
-        tk.Label(self, text="🎮  Macro Recorder", bg=BG, fg="#cba6f7",
+        tk.Label(self, text="Macro Recorder", bg=BG, fg="#cba6f7",
                  font=("Segoe UI", 16, "bold")).pack(pady=(16, 4))
         tk.Label(self, text="Enregistre tes actions et rejoue-les en boucle",
                  bg=BG, fg="#6c7086", font=("Segoe UI", 9)).pack(pady=(0, 12))
 
-        # Status bar
-        self.status_var = tk.StringVar(value="Prêt")
+        self.status_var = tk.StringVar(value="Pret")
         tk.Label(self, textvariable=self.status_var, bg="#181825", fg="#a6adc8",
                  font=("Segoe UI", 9), width=48, anchor="w",
                  padx=10, pady=4).pack(fill="x", padx=14)
 
-        # Event count
-        self.count_var = tk.StringVar(value="Actions enregistrées : 0")
+        self.count_var = tk.StringVar(value="Actions enregistrees : 0")
         tk.Label(self, textvariable=self.count_var, bg=BG, fg="#6c7086",
                  font=("Segoe UI", 9)).pack(pady=(4, 0))
 
-        # ── Record / Stop record ──
         frm1 = tk.Frame(self, bg=BG)
         frm1.pack(**PAD)
-        self.btn_rec = tk.Button(frm1, text="⏺  Démarrer l'enregistrement",
+        self.btn_rec = tk.Button(frm1, text="Demarrer l'enregistrement",
                                  command=self._start_rec, **BTN, **ACCENT)
         self.btn_rec.pack(side="left", padx=4)
-        self.btn_stop_rec = tk.Button(frm1, text="⏹  Arrêter l'enregistrement",
+        self.btn_stop_rec = tk.Button(frm1, text="Arreter l'enregistrement",
                                       command=self._stop_rec, **BTN, **RED,
                                       state="disabled")
         self.btn_stop_rec.pack(side="left", padx=4)
 
-        # ── Play options ──
         opts = tk.LabelFrame(self, text="Options de lecture", bg=BG, fg=FG,
                              font=("Segoe UI", 9), bd=1, relief="solid",
                              padx=10, pady=8)
         opts.pack(fill="x", padx=14, pady=6)
 
-        # Loops
         tk.Label(opts, text="Boucles (0 = infini) :", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=3)
         self.loops_var = tk.IntVar(value=0)
@@ -191,7 +185,6 @@ class App(tk.Tk):
                    width=6, bg="#313244", fg=FG, buttonbackground="#45475a",
                    relief="flat").grid(row=0, column=1, sticky="w", padx=8)
 
-        # Speed
         tk.Label(opts, text="Vitesse :", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=3)
         self.speed_var = tk.DoubleVar(value=1.0)
@@ -204,8 +197,7 @@ class App(tk.Tk):
         tk.Label(speed_frame, textvariable=self.speed_var, bg=BG, fg=FG,
                  font=("Segoe UI", 9), width=4).pack(side="left")
 
-        # Delay between loops
-        tk.Label(opts, text="Délai entre boucles (s) :", bg=BG, fg=FG,
+        tk.Label(opts, text="Delai entre boucles (s) :", bg=BG, fg=FG,
                  font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=3)
         self.delay_var = tk.DoubleVar(value=0.5)
         tk.Spinbox(opts, from_=0.0, to=60.0, increment=0.5,
@@ -213,36 +205,31 @@ class App(tk.Tk):
                    bg="#313244", fg=FG, buttonbackground="#45475a",
                    relief="flat").grid(row=2, column=1, sticky="w", padx=8)
 
-        # ── Play / Stop play ──
         frm2 = tk.Frame(self, bg=BG)
         frm2.pack(**PAD)
-        self.btn_play = tk.Button(frm2, text="▶  Lancer la macro",
+        self.btn_play = tk.Button(frm2, text="Lancer la macro",
                                   command=self._start_play, **BTN, **BLUE)
         self.btn_play.pack(side="left", padx=4)
-        self.btn_stop_play = tk.Button(frm2, text="⏹  Stopper la lecture",
+        self.btn_stop_play = tk.Button(frm2, text="Stopper la lecture",
                                        command=self._stop_play, **BTN, **RED,
                                        state="disabled")
         self.btn_stop_play.pack(side="left", padx=4)
 
-        # ── Save / Load / Clear ──
         frm3 = tk.Frame(self, bg=BG)
         frm3.pack(**PAD)
         small = dict(BTN, width=10, height=1)
-        tk.Button(frm3, text="💾 Sauvegarder", command=self._save, **small).pack(side="left", padx=3)
-        tk.Button(frm3, text="📂 Charger",     command=self._load, **small).pack(side="left", padx=3)
-        tk.Button(frm3, text="🗑 Effacer",      command=self._clear, **small,
+        tk.Button(frm3, text="Sauvegarder", command=self._save, **small).pack(side="left", padx=3)
+        tk.Button(frm3, text="Charger",     command=self._load, **small).pack(side="left", padx=3)
+        tk.Button(frm3, text="Effacer",     command=self._clear, **small,
                   bg="#f38ba8", fg="#1e1e2e").pack(side="left", padx=3)
 
         tk.Label(self, text="F5 = Lancer  |  F6 = Stopper  |  F9 = Enregistrer  |  F10 = Stop enreg.",
                  bg=BG, fg="#45475a", font=("Segoe UI", 8)).pack(pady=(6, 12))
 
-        # Hotkeys
         self.bind_all("<F9>",  lambda e: self._start_rec())
         self.bind_all("<F10>", lambda e: self._stop_rec())
         self.bind_all("<F5>",  lambda e: self._start_play())
         self.bind_all("<F6>",  lambda e: self._stop_play())
-
-    # ── Actions ──────────────────────────────────────────────────────────────
 
     def _start_rec(self):
         global recording, events, record_start
@@ -251,14 +238,14 @@ class App(tk.Tk):
         events = []
         record_start = time.time()
         recording = True
-        self.status_var.set("⏺ Enregistrement en cours…")
+        self.status_var.set("Enregistrement en cours...")
         self.btn_rec.config(state="disabled")
         self.btn_stop_rec.config(state="normal")
         self._poll_count()
 
     def _poll_count(self):
         if recording:
-            self.count_var.set(f"Actions enregistrées : {len(events)}")
+            self.count_var.set(f"Actions enregistrees : {len(events)}")
             self.after(200, self._poll_count)
 
     def _stop_rec(self):
@@ -266,14 +253,14 @@ class App(tk.Tk):
         recording = False
         self.btn_rec.config(state="normal")
         self.btn_stop_rec.config(state="disabled")
-        self.count_var.set(f"Actions enregistrées : {len(events)}")
-        self.status_var.set(f"Enregistrement terminé — {len(events)} actions")
+        self.count_var.set(f"Actions enregistrees : {len(events)}")
+        self.status_var.set(f"Enregistrement termine - {len(events)} actions")
 
     def _start_play(self):
         global playing, play_thread
         if playing or recording or not events:
             if not events:
-                messagebox.showwarning("Vide", "Aucune macro enregistrée.\nFais un enregistrement d'abord.")
+                messagebox.showwarning("Vide", "Aucune macro enregistree.\nFais un enregistrement d'abord.")
             return
         stop_event.clear()
         playing = True
@@ -300,7 +287,7 @@ class App(tk.Tk):
         stop_event.set()
         self.btn_play.config(state="normal")
         self.btn_stop_play.config(state="disabled")
-        self.status_var.set("Lecture arrêtée")
+        self.status_var.set("Lecture arretee")
 
     def _save(self):
         path = filedialog.asksaveasfilename(
@@ -312,7 +299,7 @@ class App(tk.Tk):
         if path:
             with open(path, "w") as f:
                 json.dump(events, f, indent=2)
-            self.status_var.set(f"Sauvegardé : {os.path.basename(path)}")
+            self.status_var.set(f"Sauvegarde : {os.path.basename(path)}")
 
     def _load(self):
         global events
@@ -324,15 +311,15 @@ class App(tk.Tk):
         if path:
             with open(path) as f:
                 events = json.load(f)
-            self.count_var.set(f"Actions enregistrées : {len(events)}")
-            self.status_var.set(f"Chargé : {os.path.basename(path)} ({len(events)} actions)")
+            self.count_var.set(f"Actions enregistrees : {len(events)}")
+            self.status_var.set(f"Charge : {os.path.basename(path)} ({len(events)} actions)")
 
     def _clear(self):
         global events
         if messagebox.askyesno("Effacer", "Effacer la macro actuelle ?"):
             events = []
-            self.count_var.set("Actions enregistrées : 0")
-            self.status_var.set("Macro effacée")
+            self.count_var.set("Actions enregistrees : 0")
+            self.status_var.set("Macro effacee")
 
     def _on_close(self):
         stop_event.set()
