@@ -1,0 +1,1337 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Survie - Jeu de Survie</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { background: #111; display: flex; justify-content: center; align-items: center; height: 100vh; overflow: hidden; font-family: 'Courier New', monospace; }
+#gameCanvas { display: block; cursor: crosshair; image-rendering: pixelated; }
+</style>
+</head>
+<body>
+<canvas id="gameCanvas"></canvas>
+<script>
+// ============================================================
+// CONSTANTS
+// ============================================================
+const TILE = 48;
+const CW = window.innerWidth;
+const CH = window.innerHeight;
+
+// Tile IDs
+const T = { GRASS: 0, DIRT: 1, WATER: 2, STONE_GROUND: 3, SNOW: 4 };
+
+// Structure type IDs
+const S = { WOOD_WALL: 1, WOOD_FLOOR: 2, CAMPFIRE: 3, CHEST: 4 };
+
+// Entity types
+const E = { TREE: 0, ROCK: 1, BUSH: 2, PINE: 3, BIG_ROCK: 4 };
+
+// Item definitions
+const ITEM_DEF = {
+  wood:       { name: 'Bois',       color: '#8B4513', stack: 99 },
+  stone:      { name: 'Pierre',     color: '#888',    stack: 99 },
+  fiber:      { name: 'Fibre',      color: '#7CFC00', stack: 99 },
+  food:       { name: 'Baies',      color: '#e63946', stack: 20 },
+  axe:        { name: 'Hache',      color: '#CD853F', stack: 1  },
+  pickaxe:    { name: 'Pioche',     color: '#C0C0C0', stack: 1  },
+  sword:      { name: 'Épée',       color: '#4169E1', stack: 1  },
+  wall_item:  { name: 'Mur bois',   color: '#DEB887', stack: 20 },
+  floor_item: { name: 'Sol bois',   color: '#D2B48C', stack: 20 },
+  campfire_item: { name: 'Feu de camp', color: '#FF6600', stack: 5 },
+};
+
+// Crafting recipes
+const RECIPES = [
+  { result: 'axe',           qty: 1, needs: { wood: 5, stone: 3 } },
+  { result: 'pickaxe',       qty: 1, needs: { wood: 5, stone: 5 } },
+  { result: 'sword',         qty: 1, needs: { wood: 3, stone: 8 } },
+  { result: 'wall_item',     qty: 4, needs: { wood: 8 } },
+  { result: 'floor_item',    qty: 4, needs: { wood: 4 } },
+  { result: 'campfire_item', qty: 1, needs: { wood: 6, stone: 4 } },
+];
+
+// Biome display names
+const BIOME_NAMES = { forest: 'Forêt', mountain: 'Montagne', snow: 'Toundra', plains: 'Plaines' };
+
+// ============================================================
+// UTILS
+// ============================================================
+function rng(min, max) { return Math.floor(Math.random() * (max - min + 1)) + min; }
+
+// ============================================================
+// INPUT
+// ============================================================
+const Keys = {};
+let prevKeys = {};
+window.addEventListener('keydown', e => { Keys[e.code] = true; e.preventDefault(); });
+window.addEventListener('keyup',   e => { Keys[e.code] = false; });
+
+const Mouse = { x: 0, y: 0, down: false, justDown: false };
+window.addEventListener('mousemove', e => { Mouse.x = e.clientX; Mouse.y = e.clientY; });
+window.addEventListener('mousedown', e => { Mouse.down = true; Mouse.justDown = true; });
+window.addEventListener('mouseup',   e => { Mouse.down = false; });
+
+// Touch support
+window.addEventListener('touchstart', e => {
+  const t = e.touches[0];
+  Mouse.x = t.clientX; Mouse.y = t.clientY;
+  Mouse.down = true; Mouse.justDown = true;
+}, { passive: true });
+window.addEventListener('touchend', () => { Mouse.down = false; }, { passive: true });
+window.addEventListener('touchmove', e => {
+  const t = e.touches[0];
+  Mouse.x = t.clientX; Mouse.y = t.clientY;
+}, { passive: true });
+
+function keyJustPressed(code) { return Keys[code] && !prevKeys[code]; }
+
+// ============================================================
+// INVENTORY
+// ============================================================
+class Inventory {
+  constructor(size = 24) {
+    this.slots = new Array(size).fill(null);
+    this.selected = 0;
+  }
+
+  add(id, qty = 1) {
+    const def = ITEM_DEF[id];
+    if (!def) return false;
+    // Stack existing
+    for (let i = 0; i < this.slots.length; i++) {
+      if (this.slots[i]?.id === id) {
+        const space = def.stack - this.slots[i].qty;
+        if (space > 0) {
+          const add = Math.min(space, qty);
+          this.slots[i].qty += add;
+          qty -= add;
+          if (qty <= 0) return true;
+        }
+      }
+    }
+    // Empty slot
+    for (let i = 0; i < this.slots.length; i++) {
+      if (!this.slots[i]) {
+        this.slots[i] = { id, qty: Math.min(qty, def.stack) };
+        qty -= this.slots[i].qty;
+        if (qty <= 0) return true;
+      }
+    }
+    return qty <= 0;
+  }
+
+  remove(id, qty = 1) {
+    for (let i = this.slots.length - 1; i >= 0; i--) {
+      if (this.slots[i]?.id === id) {
+        const take = Math.min(this.slots[i].qty, qty);
+        this.slots[i].qty -= take;
+        qty -= take;
+        if (this.slots[i].qty === 0) this.slots[i] = null;
+        if (qty <= 0) return true;
+      }
+    }
+    return false;
+  }
+
+  count(id) {
+    return this.slots.reduce((n, s) => n + (s?.id === id ? s.qty : 0), 0);
+  }
+
+  getSelected() { return this.slots[this.selected]; }
+}
+
+// ============================================================
+// MAP
+// ============================================================
+class GameMap {
+  constructor(id, biome = 'forest', seed = 0) {
+    this.id = id;
+    this.biome = biome;
+    this.seed = seed;
+    this.w = 40;
+    this.h = 40;
+    this.tiles = [];
+    this.entities = [];
+    this.structures = [];
+    this.exits = {}; // { north, south, east, west } = mapId
+    this._generate();
+  }
+
+  _noise(x, y) {
+    return Math.sin(x * 0.37 + this.seed * 7.1) * Math.cos(y * 0.29 + this.seed * 3.3);
+  }
+
+  _generate() {
+    for (let y = 0; y < this.h; y++) {
+      this.tiles[y] = [];
+      for (let x = 0; x < this.w; x++) {
+        this.tiles[y][x] = this._genTile(x, y);
+      }
+    }
+    this._spawnResources();
+  }
+
+  _genTile(x, y) {
+    if (x === 0 || y === 0 || x === this.w - 1 || y === this.h - 1) return T.DIRT;
+    const n = this._noise(x, y);
+    if (this.biome === 'forest') {
+      return n < -0.55 ? T.WATER : T.GRASS;
+    }
+    if (this.biome === 'mountain') {
+      if (n < -0.5) return T.WATER;
+      if (n > 0.45) return T.STONE_GROUND;
+      return T.GRASS;
+    }
+    if (this.biome === 'snow') {
+      return n < -0.45 ? T.WATER : T.SNOW;
+    }
+    if (this.biome === 'plains') {
+      return n < -0.65 ? T.WATER : T.GRASS;
+    }
+    return T.GRASS;
+  }
+
+  _entityMaxHp(type) {
+    return [6, 10, 2, 6, 15][type] ?? 5;
+  }
+
+  _spawnResources() {
+    const counts = { forest: 90, mountain: 50, snow: 40, plains: 60 };
+    const n = counts[this.biome] ?? 60;
+    for (let i = 0; i < n; i++) {
+      const x = rng(2, this.w - 3);
+      const y = rng(2, this.h - 3);
+      if (this.tiles[y]?.[x] === T.WATER) continue;
+      if (this.getEntityAt(x, y)) continue;
+
+      let type;
+      if (this.biome === 'forest') {
+        const r = Math.random();
+        type = r < 0.55 ? E.TREE : r < 0.75 ? E.BUSH : E.ROCK;
+      } else if (this.biome === 'mountain') {
+        const r = Math.random();
+        type = r < 0.55 ? E.BIG_ROCK : r < 0.8 ? E.PINE : E.ROCK;
+      } else if (this.biome === 'snow') {
+        type = Math.random() < 0.6 ? E.PINE : E.ROCK;
+      } else {
+        const r = Math.random();
+        type = r < 0.3 ? E.TREE : r < 0.55 ? E.BUSH : E.ROCK;
+      }
+
+      const maxHp = this._entityMaxHp(type);
+      this.entities.push({ x, y, type, hp: maxHp, maxHp, dead: false, shakeTimer: 0 });
+    }
+  }
+
+  getEntityAt(x, y) {
+    return this.entities.find(e => !e.dead && e.x === x && e.y === y) ?? null;
+  }
+
+  getStructureAt(x, y) {
+    return this.structures.find(s => s.x === x && s.y === y) ?? null;
+  }
+
+  isWalkable(x, y) {
+    if (x < 0 || y < 0 || x >= this.w || y >= this.h) return false;
+    if (this.tiles[y]?.[x] === T.WATER) return false;
+    if (this.getEntityAt(x, y)) return false;
+    const s = this.getStructureAt(Math.floor(x), Math.floor(y));
+    if (s && s.type === S.WOOD_WALL) return false;
+    return true;
+  }
+}
+
+// ============================================================
+// PLAYER
+// ============================================================
+class Player {
+  constructor() {
+    this.x = 20;
+    this.y = 20;
+    this.vx = 0;
+    this.vy = 0;
+    this.speed = 5.5;
+    this.hp = 100;
+    this.maxHp = 100;
+    this.hunger = 100;
+    this.maxHunger = 100;
+    this.inv = new Inventory(24);
+    this.facing = { x: 0, y: 1 };
+    this.actionCooldown = 0;
+    this.actionRate = 0.38;
+    this.animFrame = 0;
+    this.animTimer = 0;
+    this.moving = false;
+
+    // Starter kit
+    this.inv.add('axe', 1);
+    this.inv.add('wood', 10);
+    this.inv.add('stone', 5);
+  }
+}
+
+// ============================================================
+// PARTICLES
+// ============================================================
+const particles = [];
+function spawnParticles(wx, wy, color, count = 5) {
+  for (let i = 0; i < count; i++) {
+    particles.push({
+      x: wx + rng(-8, 8), y: wy + rng(-8, 8),
+      vx: (Math.random() - 0.5) * 100,
+      vy: -rng(40, 100),
+      life: 0.5 + Math.random() * 0.4,
+      maxLife: 1,
+      color,
+      size: rng(3, 7),
+    });
+  }
+}
+
+// ============================================================
+// GAME STATE
+// ============================================================
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+canvas.width = CW;
+canvas.height = CH;
+
+const maps = {};
+let mapId = 0;
+const player = new Player();
+const cam = { x: 0, y: 0 };
+let gameTime = 0;
+let dayTime = 0;
+let showInventory = false;
+let showCrafting = false;
+let buildMode = null;     // item id of what we're placing
+let notification = null;  // { text, timer }
+let lastTime = 0;
+
+// ============================================================
+// WORLD SETUP
+// ============================================================
+function createWorld() {
+  maps[0] = new GameMap(0, 'forest',   1);
+  maps[1] = new GameMap(1, 'plains',   2);
+  maps[2] = new GameMap(2, 'mountain', 3);
+  maps[3] = new GameMap(3, 'snow',     4);
+  maps[4] = new GameMap(4, 'forest',   5);
+  maps[5] = new GameMap(5, 'mountain', 6);
+
+  // Connect zones
+  maps[0].exits = { east: 1, south: 4 };
+  maps[1].exits = { west: 0, east: 2 };
+  maps[2].exits = { west: 1, south: 3 };
+  maps[3].exits = { north: 2, west: 5 };
+  maps[4].exits = { north: 0 };
+  maps[5].exits = { east: 3 };
+}
+
+function curMap() { return maps[mapId]; }
+
+// ============================================================
+// NOTIFICATIONS
+// ============================================================
+function notify(text) {
+  notification = { text, timer: 2.8 };
+}
+
+// ============================================================
+// UPDATE
+// ============================================================
+function update(dt) {
+  gameTime += dt;
+  dayTime = (gameTime % 300) / 300; // 5-min full day
+
+  updatePlayer(dt);
+  updateParticles(dt);
+
+  if (notification) {
+    notification.timer -= dt;
+    if (notification.timer <= 0) notification = null;
+  }
+
+  // Hunger drain
+  player.hunger = Math.max(0, player.hunger - dt * 0.4);
+  if (player.hunger === 0) {
+    player.hp = Math.max(0, player.hp - dt * 1.5);
+  } else if (player.hunger > 50) {
+    // Slow regen
+    player.hp = Math.min(player.maxHp, player.hp + dt * 0.5);
+  }
+
+  Mouse.justDown = false;
+  prevKeys = { ...Keys };
+}
+
+function updatePlayer(dt) {
+  const map = curMap();
+
+  // Toggle menus
+  if (keyJustPressed('KeyI')) { showInventory = !showInventory; showCrafting = false; buildMode = null; }
+  if (keyJustPressed('KeyC')) { showCrafting = !showCrafting; showInventory = false; buildMode = null; }
+  if (keyJustPressed('Escape')) { showInventory = false; showCrafting = false; buildMode = null; }
+
+  // Hotbar
+  for (let i = 0; i < 8; i++) {
+    if (keyJustPressed(`Digit${i + 1}`)) player.inv.selected = i;
+  }
+  if (Keys['KeyQ'] && !showInventory) {
+    player.inv.selected = (player.inv.selected - 1 + 8) % 8;
+  }
+
+  if (showInventory || showCrafting) return;
+
+  // Build placement
+  if (buildMode) {
+    if (Mouse.justDown) placeBuild(map);
+    if (keyJustPressed('KeyB')) buildMode = null;
+    return;
+  }
+
+  // Movement
+  let dx = 0, dy = 0;
+  if (Keys['KeyW'] || Keys['ArrowUp'])    dy -= 1;
+  if (Keys['KeyS'] || Keys['ArrowDown'])  dy += 1;
+  if (Keys['KeyA'] || Keys['ArrowLeft'])  dx -= 1;
+  if (Keys['KeyD'] || Keys['ArrowRight']) dx += 1;
+
+  if (dx !== 0 && dy !== 0) { dx *= 0.7071; dy *= 0.7071; }
+
+  player.moving = dx !== 0 || dy !== 0;
+
+  if (player.moving) {
+    if (dx !== 0) player.facing.x = Math.sign(dx);
+    if (dy !== 0) player.facing.y = Math.sign(dy);
+
+    const nx = player.x + dx * player.speed * dt;
+    const ny = player.y + dy * player.speed * dt;
+
+    if (map.isWalkable(Math.floor(nx + 0.45), Math.floor(player.y + 0.45)) &&
+        map.isWalkable(Math.floor(nx + 0.55), Math.floor(player.y + 0.55))) {
+      player.x = nx;
+    }
+    if (map.isWalkable(Math.floor(player.x + 0.45), Math.floor(ny + 0.45)) &&
+        map.isWalkable(Math.floor(player.x + 0.55), Math.floor(ny + 0.55))) {
+      player.y = ny;
+    }
+
+    player.animTimer += dt;
+    if (player.animTimer >= 0.14) {
+      player.animTimer = 0;
+      player.animFrame = (player.animFrame + 1) % 4;
+    }
+  }
+
+  // Zone transitions
+  checkTransition(map);
+
+  // Action cooldown
+  player.actionCooldown = Math.max(0, player.actionCooldown - dt);
+
+  // Gather / attack (E or hold left click)
+  if ((keyJustPressed('KeyE') || (Mouse.down && player.actionCooldown === 0))) {
+    doAction(map);
+  }
+
+  // Eat food (F)
+  if (keyJustPressed('KeyF')) {
+    const sel = player.inv.getSelected();
+    if (sel?.id === 'food') {
+      player.inv.remove('food', 1);
+      player.hunger = Math.min(100, player.hunger + 35);
+      player.hp = Math.min(100, player.hp + 8);
+      notify('+35 Faim, +8 HP');
+    }
+  }
+
+  // Toggle build mode (B)
+  if (keyJustPressed('KeyB')) {
+    const sel = player.inv.getSelected();
+    if (sel && (sel.id === 'wall_item' || sel.id === 'floor_item' || sel.id === 'campfire_item')) {
+      buildMode = sel.id;
+      notify('Mode construction — Clic pour placer, B/ESC pour annuler');
+    }
+  }
+}
+
+function checkTransition(map) {
+  const px = player.x + 0.5;
+  const py = player.y + 0.5;
+  let nid = null, nx = player.x, ny = player.y;
+
+  if (px < 0.8 && map.exits.west != null) { nid = map.exits.west; nx = map.w - 2.5; ny = player.y; }
+  else if (px > map.w - 0.8 && map.exits.east != null) { nid = map.exits.east; nx = 1.5; ny = player.y; }
+  else if (py < 0.8 && map.exits.north != null) { nid = map.exits.north; nx = player.x; ny = map.h - 2.5; }
+  else if (py > map.h - 0.8 && map.exits.south != null) { nid = map.exits.south; nx = player.x; ny = 1.5; }
+
+  if (nid != null) {
+    mapId = nid;
+    player.x = nx;
+    player.y = ny;
+    notify('Zone: ' + (BIOME_NAMES[maps[nid].biome] ?? 'Inconnue'));
+  }
+}
+
+function doAction(map) {
+  const tx = Math.round(player.x + player.facing.x * 1.2);
+  const ty = Math.round(player.y + player.facing.y * 1.2);
+  const entity = map.getEntityAt(tx, ty);
+  const tool = player.inv.getSelected();
+
+  if (!entity) return;
+
+  let dmg = 1;
+  let ok = false;
+
+  if (entity.type === E.TREE || entity.type === E.PINE) {
+    if (!tool || tool.id !== 'axe') { notify('Il faut une hache!'); return; }
+    dmg = 2; ok = true;
+  } else if (entity.type === E.ROCK || entity.type === E.BIG_ROCK) {
+    if (!tool || tool.id !== 'pickaxe') { notify('Il faut une pioche!'); return; }
+    dmg = 2; ok = true;
+  } else if (entity.type === E.BUSH) {
+    dmg = 1; ok = true;
+  }
+
+  if (!ok) return;
+
+  entity.hp -= dmg;
+  entity.shakeTimer = 0.25;
+  const wx = tx * TILE + TILE / 2;
+  const wy = ty * TILE + TILE / 2;
+  spawnParticles(wx, wy, entity.type === E.BUSH ? '#3d7a1a' : entity.type <= E.ROCK ? '#8B4513' : '#888', 4);
+
+  if (entity.hp <= 0) {
+    entity.dead = true;
+    spawnParticles(wx, wy, '#FFD700', 10);
+
+    if (entity.type === E.TREE)     { const n = rng(3,6);  player.inv.add('wood', n);  notify(`+${n} Bois`); }
+    if (entity.type === E.PINE)     { const n = rng(2,5);  player.inv.add('wood', n);  notify(`+${n} Bois`); }
+    if (entity.type === E.ROCK)     { const n = rng(2,5);  player.inv.add('stone', n); notify(`+${n} Pierre`); }
+    if (entity.type === E.BIG_ROCK) { const n = rng(4,9);  player.inv.add('stone', n); notify(`+${n} Pierre`); }
+    if (entity.type === E.BUSH) {
+      const f = rng(1, 3), food = rng(0, 2);
+      player.inv.add('fiber', f);
+      if (food > 0) player.inv.add('food', food);
+      notify(`+${f} Fibre${food > 0 ? `, +${food} Baies` : ''}`);
+    }
+  }
+
+  player.actionCooldown = player.actionRate;
+}
+
+function placeBuild(map) {
+  const wx = cam.x + Mouse.x;
+  const wy = cam.y + Mouse.y;
+  const tx = Math.floor(wx / TILE);
+  const ty = Math.floor(wy / TILE);
+
+  if (tx < 1 || ty < 1 || tx >= map.w - 1 || ty >= map.h - 1) return;
+  if (map.getEntityAt(tx, ty)) { notify('Obstrué par une ressource!'); return; }
+  if (map.getStructureAt(tx, ty)) { notify('Déjà construit ici!'); return; }
+  if (map.tiles[ty]?.[tx] === T.WATER) { notify('Impossible sur l\'eau!'); return; }
+
+  const item = player.inv.getSelected();
+  if (!item || item.id !== buildMode) { buildMode = null; return; }
+
+  let stype;
+  if (buildMode === 'wall_item') stype = S.WOOD_WALL;
+  else if (buildMode === 'floor_item') stype = S.WOOD_FLOOR;
+  else if (buildMode === 'campfire_item') stype = S.CAMPFIRE;
+
+  map.structures.push({ x: tx, y: ty, type: stype, hp: 100, maxHp: 100 });
+  player.inv.remove(buildMode, 1);
+
+  if (player.inv.count(buildMode) === 0) {
+    buildMode = null;
+    notify('Plus de matériaux!');
+  }
+}
+
+function updateParticles(dt) {
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x += p.vx * dt;
+    p.y += p.vy * dt;
+    p.vy += 200 * dt;
+    p.life -= dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+}
+
+// ============================================================
+// RENDERING
+// ============================================================
+const TILE_COLORS = {
+  [T.GRASS]: ['#3d6b28', '#467530', '#4a7c32', '#517e36'],
+  [T.DIRT]:  ['#7a5c14', '#8a6a1c', '#6e5010'],
+  [T.WATER]: ['#1a5f8a', '#1d70a0', '#175580'],
+  [T.STONE_GROUND]: ['#6a6a6a', '#767676', '#606060'],
+  [T.SNOW]:  ['#d8e8f5', '#e5f0fc', '#cce0f0'],
+};
+
+function render() {
+  const map = curMap();
+
+  // Smooth camera
+  const tcx = player.x * TILE + TILE / 2 - CW / 2;
+  const tcy = player.y * TILE + TILE / 2 - CH / 2;
+  cam.x += (tcx - cam.x) * 0.12;
+  cam.y += (tcy - cam.y) * 0.12;
+
+  ctx.save();
+  ctx.translate(-cam.x, -cam.y);
+
+  // Culling
+  const sx = Math.max(0, Math.floor(cam.x / TILE));
+  const sy = Math.max(0, Math.floor(cam.y / TILE));
+  const ex = Math.min(map.w, sx + Math.ceil(CW / TILE) + 2);
+  const ey = Math.min(map.h, sy + Math.ceil(CH / TILE) + 2);
+
+  // Ground tiles
+  for (let y = sy; y < ey; y++) {
+    for (let x = sx; x < ex; x++) {
+      drawTile(x, y, map.tiles[y][x]);
+    }
+  }
+
+  // Floors (below entities)
+  for (const s of map.structures) {
+    if (s.type === S.WOOD_FLOOR) drawStructure(s);
+  }
+
+  // Entities
+  for (const ent of map.entities) {
+    if (!ent.dead) drawEntity(ent);
+  }
+
+  // Walls & objects (above ground, in y-order)
+  const above = map.structures.filter(s => s.type !== S.WOOD_FLOOR);
+  above.sort((a, b) => a.y - b.y);
+  for (const s of above) drawStructure(s);
+
+  // Player (between structures by y)
+  drawPlayer();
+
+  // Particles
+  for (const p of particles) {
+    ctx.globalAlpha = Math.max(0, p.life / p.maxLife);
+    ctx.fillStyle = p.color;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, p.size * Math.max(0, p.life / p.maxLife), 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+
+  // Build ghost
+  if (buildMode) drawBuildGhost(map);
+
+  ctx.restore();
+
+  // Overlays
+  drawDayNight();
+  drawHotbar();
+  drawStats();
+  drawDirectionHints(map);
+  drawMinimap(map);
+  if (notification) drawNotification();
+  if (showInventory) drawInventory();
+  if (showCrafting) drawCraftingUI();
+}
+
+function drawTile(x, y, type) {
+  const cols = TILE_COLORS[type] ?? TILE_COLORS[T.GRASS];
+  const ci = (x * 13 + y * 7) % cols.length;
+  ctx.fillStyle = cols[ci];
+  ctx.fillRect(x * TILE, y * TILE, TILE, TILE);
+
+  if (type === T.WATER) {
+    const w = Math.sin(gameTime * 1.8 + x * 0.6 + y * 0.4);
+    if (w > 0.3) {
+      ctx.fillStyle = 'rgba(255,255,255,0.12)';
+      ctx.fillRect(x * TILE + 6, y * TILE + 14, 22, 4);
+    }
+  }
+}
+
+function drawEntity(ent) {
+  const wx = ent.x * TILE;
+  const wy = ent.y * TILE;
+  const shake = ent.shakeTimer > 0 ? Math.sin(ent.shakeTimer * 60) * 4 : 0;
+
+  ctx.save();
+  ctx.translate(wx + TILE / 2 + shake, wy + TILE / 2);
+
+  switch (ent.type) {
+    case E.TREE: {
+      ctx.fillStyle = '#5a2d0c';
+      ctx.fillRect(-5, 4, 10, 20);
+      ctx.fillStyle = '#1e4d10';
+      ctx.beginPath(); ctx.arc(0, -6, 22, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2a6318';
+      ctx.beginPath(); ctx.arc(-3, -10, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#358020';
+      ctx.beginPath(); ctx.arc(4, -14, 10, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case E.PINE: {
+      ctx.fillStyle = '#4a2008';
+      ctx.fillRect(-3, 6, 6, 18);
+      ctx.fillStyle = '#14400c';
+      ctx.beginPath(); ctx.moveTo(0, -24); ctx.lineTo(18, 10); ctx.lineTo(-18, 10); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#1c5c12';
+      ctx.beginPath(); ctx.moveTo(0, -18); ctx.lineTo(14, 6); ctx.lineTo(-14, 6); ctx.closePath(); ctx.fill();
+      ctx.fillStyle = '#267018';
+      ctx.beginPath(); ctx.moveTo(0, -10); ctx.lineTo(10, 4); ctx.lineTo(-10, 4); ctx.closePath(); ctx.fill();
+      break;
+    }
+    case E.ROCK: {
+      ctx.fillStyle = '#555';
+      ctx.beginPath(); ctx.ellipse(0, 6, 17, 12, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#777';
+      ctx.beginPath(); ctx.ellipse(-2, 3, 12, 9, -0.3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#999';
+      ctx.beginPath(); ctx.ellipse(-4, 0, 5, 4, -0.5, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case E.BIG_ROCK: {
+      ctx.fillStyle = '#484848';
+      ctx.beginPath(); ctx.ellipse(0, 7, 22, 17, 0, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#686868';
+      ctx.beginPath(); ctx.ellipse(-3, 3, 16, 12, -0.3, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#888';
+      ctx.beginPath(); ctx.ellipse(-5, -1, 8, 6, -0.5, 0, Math.PI * 2); ctx.fill();
+      break;
+    }
+    case E.BUSH: {
+      ctx.fillStyle = '#2a5c12';
+      ctx.beginPath(); ctx.arc(0, 2, 15, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#3a7a1a';
+      ctx.beginPath(); ctx.arc(-4, -2, 11, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#c0392b';
+      for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(Math.cos(i * 1.57) * 9, Math.sin(i * 1.57) * 9 - 2, 4, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      break;
+    }
+  }
+
+  // HP bar when damaged
+  if (ent.hp < ent.maxHp) {
+    const bw = 36;
+    ctx.fillStyle = '#222';
+    ctx.fillRect(-bw / 2, -26, bw, 5);
+    ctx.fillStyle = ent.hp / ent.maxHp > 0.5 ? '#2ecc71' : '#e74c3c';
+    ctx.fillRect(-bw / 2, -26, bw * (ent.hp / ent.maxHp), 5);
+  }
+
+  if (ent.shakeTimer > 0) ent.shakeTimer = Math.max(0, ent.shakeTimer - 0.016);
+  ctx.restore();
+}
+
+function drawStructure(s) {
+  const wx = s.x * TILE;
+  const wy = s.y * TILE;
+
+  if (s.type === S.WOOD_FLOOR) {
+    ctx.fillStyle = '#b8820e';
+    ctx.fillRect(wx, wy, TILE, TILE);
+    ctx.strokeStyle = '#8a6010';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(wx + 5, wy + 5, TILE - 10, TILE - 10);
+    ctx.beginPath();
+    ctx.moveTo(wx, wy + TILE / 2); ctx.lineTo(wx + TILE, wy + TILE / 2);
+    ctx.moveTo(wx + TILE / 2, wy); ctx.lineTo(wx + TILE / 2, wy + TILE);
+    ctx.strokeStyle = 'rgba(120,80,10,0.3)';
+    ctx.stroke();
+  } else if (s.type === S.WOOD_WALL) {
+    ctx.fillStyle = '#7a5c0c';
+    ctx.fillRect(wx + 1, wy + 1, TILE - 2, TILE - 2);
+    ctx.fillStyle = '#9a7a1c';
+    ctx.fillRect(wx + 4, wy + 4, TILE - 8, 10);
+    ctx.fillRect(wx + 4, wy + TILE / 2 - 2, TILE - 8, 8);
+    ctx.strokeStyle = '#5c4008';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(wx + 1, wy + 1, TILE - 2, TILE - 2);
+  } else if (s.type === S.CAMPFIRE) {
+    // Base stones
+    ctx.fillStyle = '#666';
+    ctx.beginPath(); ctx.arc(wx + TILE / 2, wy + TILE / 2 + 4, 14, 0, Math.PI * 2); ctx.fill();
+    // Logs
+    ctx.fillStyle = '#6B3A2A';
+    ctx.fillRect(wx + TILE / 2 - 14, wy + TILE / 2 + 2, 28, 6);
+    ctx.fillRect(wx + TILE / 2 - 6, wy + TILE / 2 - 10, 12, 18);
+    // Fire flicker
+    const flicker = Math.sin(gameTime * 8 + s.x + s.y) * 3;
+    ctx.fillStyle = '#FF4500';
+    ctx.beginPath();
+    ctx.moveTo(wx + TILE / 2, wy + TILE / 2 - 14 + flicker);
+    ctx.lineTo(wx + TILE / 2 + 10, wy + TILE / 2 + 4);
+    ctx.lineTo(wx + TILE / 2 - 10, wy + TILE / 2 + 4);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#FFD700';
+    ctx.beginPath();
+    ctx.moveTo(wx + TILE / 2, wy + TILE / 2 - 8 + flicker * 0.7);
+    ctx.lineTo(wx + TILE / 2 + 5, wy + TILE / 2 + 4);
+    ctx.lineTo(wx + TILE / 2 - 5, wy + TILE / 2 + 4);
+    ctx.closePath(); ctx.fill();
+  }
+}
+
+function drawPlayer() {
+  const px = player.x * TILE + TILE / 2;
+  const py = player.y * TILE + TILE / 2;
+  const bob = player.moving ? Math.sin(player.animFrame * Math.PI / 2) * 2 : 0;
+  const legSwing = player.moving ? Math.sin(player.animFrame * Math.PI / 2) * 8 : 0;
+
+  ctx.save();
+  ctx.translate(px, py + bob);
+
+  // Shadow
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath(); ctx.ellipse(0, 20, 13, 5, 0, 0, Math.PI * 2); ctx.fill();
+
+  // Legs
+  ctx.fillStyle = '#2a4a8a';
+  ctx.fillRect(-9, 4 + legSwing * 0.3, 8, 16);
+  ctx.fillRect(1, 4 - legSwing * 0.3, 8, 16);
+
+  // Boots
+  ctx.fillStyle = '#3a2010';
+  ctx.fillRect(-10, 18 + legSwing * 0.3, 9, 5);
+  ctx.fillRect(1, 18 - legSwing * 0.3, 9, 5);
+
+  // Body
+  ctx.fillStyle = '#3a6ea5';
+  ctx.fillRect(-11, -10, 22, 18);
+
+  // Belt
+  ctx.fillStyle = '#5a3800';
+  ctx.fillRect(-11, 4, 22, 4);
+  ctx.fillStyle = '#cc9900';
+  ctx.fillRect(-3, 4, 6, 4);
+
+  // Arms
+  const armSwing = player.moving ? legSwing * 0.5 : 0;
+  ctx.fillStyle = '#2a5a8a';
+  ctx.fillRect(-19, -8 - armSwing, 8, 16);
+  ctx.fillRect(11, -8 + armSwing, 8, 16);
+
+  // Head
+  ctx.fillStyle = '#f0c090';
+  ctx.beginPath(); ctx.arc(0, -18, 12, 0, Math.PI * 2); ctx.fill();
+
+  // Hair
+  ctx.fillStyle = '#3a2a00';
+  ctx.fillRect(-12, -29, 24, 14);
+  ctx.beginPath(); ctx.arc(0, -28, 12, Math.PI, 0); ctx.fill();
+
+  // Eyes
+  ctx.fillStyle = '#1a1a2a';
+  ctx.fillRect(-6, -21, 4, 4);
+  ctx.fillRect(2, -21, 4, 4);
+
+  // Eye shine
+  ctx.fillStyle = 'white';
+  ctx.fillRect(-5, -20, 2, 2);
+  ctx.fillRect(3, -20, 2, 2);
+
+  // Mouth
+  ctx.strokeStyle = '#c07060';
+  ctx.lineWidth = 1.5;
+  ctx.beginPath(); ctx.arc(0, -15, 4, 0.1, Math.PI - 0.1); ctx.stroke();
+
+  // Tool in right hand
+  const tool = player.inv.getSelected();
+  if (tool) {
+    ctx.save();
+    ctx.translate(19, -8 + armSwing);
+    if (tool.id === 'axe') {
+      ctx.fillStyle = '#8B5e3c';
+      ctx.fillRect(-2, -12, 4, 24);
+      ctx.fillStyle = '#aaa';
+      ctx.beginPath();
+      ctx.moveTo(2, -12); ctx.lineTo(14, -6); ctx.lineTo(10, 4); ctx.lineTo(2, 2); ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = '#ddd';
+      ctx.fillRect(2, -12, 12, 4);
+    } else if (tool.id === 'pickaxe') {
+      ctx.fillStyle = '#8B5e3c';
+      ctx.fillRect(-2, -12, 4, 24);
+      ctx.fillStyle = '#c0c0c0';
+      ctx.fillRect(-14, -16, 28, 7);
+      ctx.fillRect(-14, -16, 7, 12);
+      ctx.fillRect(7, -16, 7, 12);
+    } else if (tool.id === 'sword') {
+      ctx.fillStyle = '#8B5e3c';
+      ctx.fillRect(-2, 2, 4, 12);
+      ctx.fillStyle = '#888';
+      ctx.fillRect(-6, 0, 12, 4);
+      ctx.fillStyle = '#d4d4e8';
+      ctx.fillRect(-2, -18, 4, 22);
+      ctx.fillStyle = '#aaaacc';
+      ctx.fillRect(-1, -22, 2, 6);
+    }
+    ctx.restore();
+  }
+
+  ctx.restore();
+}
+
+function drawBuildGhost(map) {
+  const wx = cam.x + Mouse.x;
+  const wy = cam.y + Mouse.y;
+  const tx = Math.floor(wx / TILE);
+  const ty = Math.floor(wy / TILE);
+
+  const blocked = !!(map.getEntityAt(tx, ty) || map.getStructureAt(tx, ty) || map.tiles[ty]?.[tx] === T.WATER);
+  ctx.fillStyle = blocked ? 'rgba(220,40,40,0.35)' : 'rgba(40,220,40,0.35)';
+  ctx.strokeStyle = blocked ? 'rgba(220,40,40,0.9)' : 'rgba(40,220,40,0.9)';
+  ctx.lineWidth = 2;
+  ctx.fillRect(tx * TILE, ty * TILE, TILE, TILE);
+  ctx.strokeRect(tx * TILE, ty * TILE, TILE, TILE);
+}
+
+function drawDayNight() {
+  // 0=midnight 0.25=dawn 0.5=noon 0.75=dusk
+  let alpha = 0;
+  if (dayTime < 0.2)       alpha = 0.65;
+  else if (dayTime < 0.3)  alpha = 0.65 - (dayTime - 0.2) / 0.1 * 0.65;
+  else if (dayTime < 0.7)  alpha = 0;
+  else if (dayTime < 0.8)  alpha = (dayTime - 0.7) / 0.1 * 0.65;
+  else                     alpha = 0.65;
+
+  if (alpha > 0.01) {
+    ctx.fillStyle = `rgba(5,10,40,${alpha})`;
+    ctx.fillRect(0, 0, CW, CH);
+  }
+
+  // Clock
+  const hour = Math.floor(dayTime * 24);
+  const min  = Math.floor((dayTime * 24 - hour) * 60);
+  const timeStr = String(hour).padStart(2, '0') + ':' + String(min).padStart(2, '0');
+  const isDay = dayTime > 0.25 && dayTime < 0.75;
+  ctx.fillStyle = isDay ? 'rgba(255,240,180,0.9)' : 'rgba(180,200,255,0.9)';
+  ctx.font = 'bold 14px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText((isDay ? '☀ ' : '☽ ') + timeStr, CW / 2, 22);
+}
+
+function drawItemIcon(ctx2, id, x, y, w, h) {
+  ctx2.save();
+  ctx2.translate(x + w / 2, y + h / 2);
+  const s = Math.min(w, h) / 2;
+
+  switch (id) {
+    case 'wood':
+      ctx2.fillStyle = '#6B3A2A';
+      ctx2.fillRect(-s * 0.9, -s * 0.25, s * 1.8, s * 0.5);
+      ctx2.fillRect(-s * 0.25, -s * 0.8, s * 0.5, s * 1.6);
+      break;
+    case 'stone':
+      ctx2.fillStyle = '#777';
+      ctx2.beginPath(); ctx2.arc(0, 0, s * 0.75, 0, Math.PI * 2); ctx2.fill();
+      ctx2.fillStyle = '#aaa';
+      ctx2.beginPath(); ctx2.arc(-s * 0.15, -s * 0.15, s * 0.4, 0, Math.PI * 2); ctx2.fill();
+      break;
+    case 'fiber':
+      ctx2.strokeStyle = '#6BCF00'; ctx2.lineWidth = 2;
+      for (let i = -1; i <= 1; i++) {
+        ctx2.beginPath();
+        ctx2.moveTo(i * s * 0.4, -s * 0.8);
+        ctx2.bezierCurveTo(i * s * 0.4 + s * 0.3, -s * 0.2, i * s * 0.4 - s * 0.3, s * 0.2, i * s * 0.4, s * 0.8);
+        ctx2.stroke();
+      }
+      break;
+    case 'food':
+      ctx2.fillStyle = '#c0392b';
+      ctx2.beginPath(); ctx2.arc(0, 0, s * 0.7, 0, Math.PI * 2); ctx2.fill();
+      ctx2.fillStyle = '#e74c3c';
+      ctx2.beginPath(); ctx2.arc(-s * 0.15, -s * 0.15, s * 0.35, 0, Math.PI * 2); ctx2.fill();
+      ctx2.fillStyle = '#2ecc71'; ctx2.lineWidth = 2;
+      ctx2.beginPath(); ctx2.moveTo(0, -s * 0.7); ctx2.lineTo(s * 0.2, -s); ctx2.stroke();
+      break;
+    case 'axe':
+      ctx2.fillStyle = '#7a4a20'; ctx2.fillRect(-s * 0.15, -s * 0.8, s * 0.3, s * 1.6);
+      ctx2.fillStyle = '#bbb';
+      ctx2.beginPath();
+      ctx2.moveTo(s * 0.15, -s * 0.8); ctx2.lineTo(s * 0.9, -s * 0.5);
+      ctx2.lineTo(s * 0.7, s * 0.1); ctx2.lineTo(s * 0.15, 0);
+      ctx2.closePath(); ctx2.fill();
+      break;
+    case 'pickaxe':
+      ctx2.fillStyle = '#7a4a20'; ctx2.fillRect(-s * 0.15, -s * 0.7, s * 0.3, s * 1.4);
+      ctx2.fillStyle = '#c0c0c0'; ctx2.fillRect(-s * 0.9, -s * 0.9, s * 1.8, s * 0.45);
+      ctx2.fillRect(-s * 0.9, -s * 0.9, s * 0.45, s * 0.8);
+      ctx2.fillRect(s * 0.45, -s * 0.9, s * 0.45, s * 0.8);
+      break;
+    case 'sword':
+      ctx2.fillStyle = '#7a4a20'; ctx2.fillRect(-s * 0.15, s * 0.1, s * 0.3, s * 0.8);
+      ctx2.fillStyle = '#888'; ctx2.fillRect(-s * 0.6, -s * 0.05, s * 1.2, s * 0.3);
+      ctx2.fillStyle = '#ddd'; ctx2.fillRect(-s * 0.15, -s * 0.9, s * 0.3, s * 1.1);
+      break;
+    case 'wall_item':
+      ctx2.fillStyle = '#7a5c0c'; ctx2.fillRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7);
+      ctx2.fillStyle = '#9a7a2a'; ctx2.fillRect(-s * 0.7, -s * 0.6, s * 1.4, s * 0.35);
+      ctx2.fillRect(-s * 0.7, s * 0.0, s * 1.4, s * 0.35);
+      ctx2.strokeStyle = '#5c4008'; ctx2.lineWidth = 1.5;
+      ctx2.strokeRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7);
+      break;
+    case 'floor_item':
+      ctx2.fillStyle = '#b8820e'; ctx2.fillRect(-s * 0.85, -s * 0.85, s * 1.7, s * 1.7);
+      ctx2.strokeStyle = '#8a6010'; ctx2.lineWidth = 1;
+      ctx2.strokeRect(-s * 0.6, -s * 0.6, s * 1.2, s * 1.2);
+      ctx2.beginPath();
+      ctx2.moveTo(-s * 0.85, 0); ctx2.lineTo(s * 0.85, 0);
+      ctx2.moveTo(0, -s * 0.85); ctx2.lineTo(0, s * 0.85);
+      ctx2.strokeStyle = 'rgba(140,100,10,0.5)'; ctx2.stroke();
+      break;
+    case 'campfire_item':
+      ctx2.fillStyle = '#555'; ctx2.beginPath(); ctx2.arc(0, s * 0.3, s * 0.6, 0, Math.PI * 2); ctx2.fill();
+      ctx2.fillStyle = '#FF4500';
+      ctx2.beginPath(); ctx2.moveTo(0, -s * 0.8); ctx2.lineTo(s * 0.5, s * 0.2); ctx2.lineTo(-s * 0.5, s * 0.2); ctx2.closePath(); ctx2.fill();
+      ctx2.fillStyle = '#FFD700';
+      ctx2.beginPath(); ctx2.moveTo(0, -s * 0.5); ctx2.lineTo(s * 0.25, s * 0.2); ctx2.lineTo(-s * 0.25, s * 0.2); ctx2.closePath(); ctx2.fill();
+      break;
+  }
+  ctx2.restore();
+}
+
+function drawHotbar() {
+  const N = 8;
+  const sz = 54;
+  const pad = 5;
+  const totalW = N * sz + (N - 1) * pad;
+  const sx = CW / 2 - totalW / 2;
+  const sy = CH - 72;
+
+  // Background bar
+  ctx.fillStyle = 'rgba(10,10,20,0.75)';
+  ctx.fillRect(sx - 8, sy - 6, totalW + 16, sz + 16);
+  ctx.strokeStyle = 'rgba(80,80,100,0.6)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(sx - 8, sy - 6, totalW + 16, sz + 16);
+
+  for (let i = 0; i < N; i++) {
+    const x = sx + i * (sz + pad);
+    const sel = i === player.inv.selected;
+
+    ctx.fillStyle = sel ? 'rgba(255,200,50,0.25)' : 'rgba(30,30,50,0.8)';
+    ctx.fillRect(x, sy, sz, sz);
+    ctx.strokeStyle = sel ? '#FFD700' : 'rgba(80,80,100,0.8)';
+    ctx.lineWidth = sel ? 2.5 : 1;
+    ctx.strokeRect(x, sy, sz, sz);
+
+    const slot = player.inv.slots[i];
+    if (slot) {
+      drawItemIcon(ctx, slot.id, x + 5, sy + 5, sz - 10, sz - 10);
+      if (slot.qty > 1) {
+        ctx.fillStyle = 'rgba(0,0,0,0.6)';
+        ctx.fillRect(x + sz - 24, sy + sz - 18, 22, 14);
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 11px Courier New';
+        ctx.textAlign = 'right';
+        ctx.fillText(slot.qty, x + sz - 3, sy + sz - 5);
+      }
+    }
+
+    // Slot number hint
+    ctx.fillStyle = 'rgba(180,180,200,0.55)';
+    ctx.font = '9px Courier New';
+    ctx.textAlign = 'center';
+    ctx.fillText(i + 1, x + sz / 2, sy + sz + 13);
+  }
+}
+
+function drawStats() {
+  const bw = 190, bh = 15;
+  const x = 14, y = CH - 118;
+
+  const panel = (px, py, pw, ph) => {
+    ctx.fillStyle = 'rgba(10,10,20,0.75)';
+    ctx.fillRect(px, py, pw, ph);
+    ctx.strokeStyle = 'rgba(80,80,100,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px, py, pw, ph);
+  };
+
+  // HP
+  panel(x - 4, y - 4, bw + 8, bh + 14);
+  ctx.fillStyle = '#7a1a1a';
+  ctx.fillRect(x, y, bw, bh);
+  ctx.fillStyle = '#e74c3c';
+  ctx.fillRect(x, y, bw * (player.hp / player.maxHp), bh);
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 10px Courier New';
+  ctx.textAlign = 'left';
+  ctx.fillText(`♥ ${Math.ceil(player.hp)}/${player.maxHp}`, x + 4, y + 11);
+
+  // Hunger
+  const hy = y + 26;
+  panel(x - 4, hy - 4, bw + 8, bh + 14);
+  ctx.fillStyle = '#6a3a00';
+  ctx.fillRect(x, hy, bw, bh);
+  ctx.fillStyle = '#e67e22';
+  ctx.fillRect(x, hy, bw * (player.hunger / player.maxHunger), bh);
+  ctx.fillStyle = 'white';
+  ctx.font = 'bold 10px Courier New';
+  ctx.textAlign = 'left';
+  ctx.fillText(`☕ ${Math.ceil(player.hunger)}/${player.maxHunger}`, x + 4, hy + 11);
+
+  // Key hints
+  ctx.fillStyle = 'rgba(10,10,20,0.7)';
+  ctx.fillRect(x - 4, CH - 155, 240, 30);
+  ctx.fillStyle = 'rgba(200,200,220,0.65)';
+  ctx.font = '10px Courier New';
+  ctx.textAlign = 'left';
+  const sel = player.inv.getSelected();
+  const hasBuild = sel && (sel.id === 'wall_item' || sel.id === 'floor_item' || sel.id === 'campfire_item');
+  ctx.fillText('WASD:Bougez  E:Action  F:Manger', x, CH - 143);
+  ctx.fillText(`I:Sac  C:Craft${hasBuild ? '  B:Construire' : ''}`, x, CH - 130);
+}
+
+function drawNotification() {
+  const fade = Math.min(1, notification.timer / 0.5);
+  ctx.save();
+  ctx.globalAlpha = fade;
+  ctx.font = 'bold 16px Courier New';
+  ctx.textAlign = 'center';
+  const tw = ctx.measureText(notification.text).width;
+  const nx = CW / 2 - tw / 2 - 14;
+  const ny = CH / 2 - 80;
+  ctx.fillStyle = 'rgba(0,0,0,0.75)';
+  ctx.fillRect(nx, ny, tw + 28, 32);
+  ctx.strokeStyle = '#FFD700';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(nx, ny, tw + 28, 32);
+  ctx.fillStyle = '#FFD700';
+  ctx.fillText(notification.text, CW / 2, ny + 21);
+  ctx.restore();
+}
+
+function drawInventory() {
+  const iw = 420, ih = 400;
+  const ix = CW / 2 - iw / 2;
+  const iy = CH / 2 - ih / 2;
+  const sz = 52, pad = 5;
+
+  ctx.fillStyle = 'rgba(10,12,25,0.96)';
+  ctx.fillRect(ix, iy, iw, ih);
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(ix, iy, iw, ih);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 15px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('— INVENTAIRE —', CW / 2, iy + 24);
+
+  for (let i = 0; i < 24; i++) {
+    const col = i % 6;
+    const row = Math.floor(i / 6);
+    const sx = ix + 18 + col * (sz + pad);
+    const sy2 = iy + 36 + row * (sz + pad);
+    const sel = i === player.inv.selected;
+
+    ctx.fillStyle = sel ? 'rgba(255,200,50,0.18)' : 'rgba(25,28,50,0.8)';
+    ctx.fillRect(sx, sy2, sz, sz);
+    ctx.strokeStyle = sel ? '#FFD700' : 'rgba(70,70,100,0.8)';
+    ctx.lineWidth = sel ? 2 : 1;
+    ctx.strokeRect(sx, sy2, sz, sz);
+
+    // Hotbar marker
+    if (i < 8) {
+      ctx.fillStyle = 'rgba(255,200,50,0.25)';
+      ctx.fillRect(sx, sy2, 12, 12);
+      ctx.fillStyle = 'rgba(200,160,30,0.8)';
+      ctx.font = '8px Courier New';
+      ctx.textAlign = 'left';
+      ctx.fillText(i + 1, sx + 2, sy2 + 10);
+    }
+
+    const slot = player.inv.slots[i];
+    if (slot) {
+      drawItemIcon(ctx, slot.id, sx + 6, sy2 + 6, sz - 12, sz - 12);
+      const def = ITEM_DEF[slot.id];
+      if (slot.qty > 1) {
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 10px Courier New';
+        ctx.textAlign = 'right';
+        ctx.fillText(slot.qty, sx + sz - 3, sy2 + sz - 3);
+      }
+    }
+  }
+
+  ctx.fillStyle = 'rgba(180,180,200,0.5)';
+  ctx.font = '11px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('[I] Fermer', CW / 2, iy + ih - 10);
+}
+
+function drawCraftingUI() {
+  const cw2 = 460, ch2 = RECIPES.length * 74 + 60;
+  const cx = CW / 2 - cw2 / 2;
+  const cy = CH / 2 - ch2 / 2;
+
+  ctx.fillStyle = 'rgba(10,12,25,0.96)';
+  ctx.fillRect(cx, cy, cw2, ch2);
+  ctx.strokeStyle = '#555';
+  ctx.lineWidth = 2;
+  ctx.strokeRect(cx, cy, cw2, ch2);
+
+  ctx.fillStyle = '#FFD700';
+  ctx.font = 'bold 15px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('— FABRICATION —', CW / 2, cy + 26);
+
+  for (let i = 0; i < RECIPES.length; i++) {
+    const r = RECIPES[i];
+    const ry = cy + 44 + i * 74;
+
+    let canCraft = true;
+    for (const [id, qty] of Object.entries(r.needs)) {
+      if (player.inv.count(id) < qty) { canCraft = false; break; }
+    }
+
+    ctx.fillStyle = canCraft ? 'rgba(20,60,20,0.7)' : 'rgba(50,20,20,0.5)';
+    ctx.fillRect(cx + 10, ry, cw2 - 20, 64);
+    ctx.strokeStyle = canCraft ? 'rgba(60,180,60,0.6)' : 'rgba(100,40,40,0.5)';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(cx + 10, ry, cw2 - 20, 64);
+
+    // Icon
+    drawItemIcon(ctx, r.result, cx + 16, ry + 12, 40, 40);
+
+    // Name
+    const def = ITEM_DEF[r.result];
+    ctx.fillStyle = canCraft ? '#fff' : '#888';
+    ctx.font = 'bold 13px Courier New';
+    ctx.textAlign = 'left';
+    ctx.fillText(`${def?.name ?? r.result} ×${r.qty}`, cx + 64, ry + 22);
+
+    // Cost
+    ctx.font = '11px Courier New';
+    let nx2 = cx + 64;
+    for (const [id, qty] of Object.entries(r.needs)) {
+      const have = player.inv.count(id);
+      ctx.fillStyle = have >= qty ? '#2ecc71' : '#e74c3c';
+      ctx.fillText(`${ITEM_DEF[id]?.name ?? id}: ${have}/${qty}`, nx2, ry + 44);
+      nx2 += 130;
+    }
+
+    // Button
+    if (canCraft) {
+      const bx = cx + cw2 - 100;
+      const by = ry + 16;
+      const hover = Mouse.x >= bx && Mouse.x <= bx + 80 && Mouse.y >= by && Mouse.y <= by + 32;
+      ctx.fillStyle = hover ? '#4cd964' : '#2ecc71';
+      ctx.fillRect(bx, by, 80, 32);
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 12px Courier New';
+      ctx.textAlign = 'center';
+      ctx.fillText('Fabriquer', bx + 40, by + 20);
+
+      if (hover && Mouse.justDown) {
+        for (const [id, qty] of Object.entries(r.needs)) player.inv.remove(id, qty);
+        player.inv.add(r.result, r.qty);
+        notify(`Fabriqué : ${def?.name} ×${r.qty}`);
+      }
+    }
+  }
+
+  ctx.fillStyle = 'rgba(180,180,200,0.5)';
+  ctx.font = '11px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText('[C] Fermer', CW / 2, cy + ch2 - 10);
+}
+
+function drawMinimap(map) {
+  const mm = 130;
+  const mx = CW - mm - 10;
+  const my = 10;
+  const ts = mm / map.w;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.8)';
+  ctx.fillRect(mx - 2, my - 2, mm + 4, mm + 20);
+  ctx.strokeStyle = 'rgba(80,80,100,0.6)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(mx - 2, my - 2, mm + 4, mm + 20);
+
+  for (let y = 0; y < map.h; y++) {
+    for (let x = 0; x < map.w; x++) {
+      const tile = map.tiles[y][x];
+      ctx.fillStyle =
+        tile === T.WATER ? '#1a5f8a' :
+        tile === T.SNOW ? '#c8e0f5' :
+        tile === T.STONE_GROUND ? '#666' :
+        tile === T.DIRT ? '#7a5c14' : '#3d6b28';
+      ctx.fillRect(mx + x * ts, my + y * ts, Math.ceil(ts), Math.ceil(ts));
+    }
+  }
+
+  // Structures
+  for (const s of map.structures) {
+    ctx.fillStyle = s.type === S.WOOD_FLOOR ? '#b8820e' : '#7a5c0c';
+    ctx.fillRect(mx + s.x * ts, my + s.y * ts, Math.max(2, ts), Math.max(2, ts));
+  }
+
+  // Player dot
+  ctx.fillStyle = '#FFD700';
+  ctx.beginPath();
+  ctx.arc(mx + player.x * ts, my + player.y * ts, 3, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Zone name
+  ctx.fillStyle = 'rgba(220,220,230,0.85)';
+  ctx.font = '10px Courier New';
+  ctx.textAlign = 'center';
+  ctx.fillText(BIOME_NAMES[map.biome] ?? 'Zone', mx + mm / 2, my + mm + 14);
+}
+
+function drawDirectionHints(map) {
+  ctx.font = '11px Courier New';
+  ctx.fillStyle = 'rgba(255,255,255,0.55)';
+  if (map.exits.north != null) {
+    ctx.textAlign = 'center';
+    ctx.fillText('▲ ' + (BIOME_NAMES[maps[map.exits.north]?.biome] ?? '?'), CW / 2, 38);
+  }
+  if (map.exits.south != null) {
+    ctx.textAlign = 'center';
+    ctx.fillText('▼ ' + (BIOME_NAMES[maps[map.exits.south]?.biome] ?? '?'), CW / 2, CH - 8);
+  }
+  if (map.exits.west != null) {
+    ctx.textAlign = 'left';
+    ctx.fillText('◄ ' + (BIOME_NAMES[maps[map.exits.west]?.biome] ?? '?'), 6, CH / 2);
+  }
+  if (map.exits.east != null) {
+    ctx.textAlign = 'right';
+    ctx.fillText((BIOME_NAMES[maps[map.exits.east]?.biome] ?? '?') + ' ►', CW - 6, CH / 2);
+  }
+}
+
+// ============================================================
+// GAME LOOP
+// ============================================================
+function loop(ts) {
+  const dt = Math.min((ts - lastTime) / 1000, 0.1);
+  lastTime = ts;
+  update(dt);
+  render();
+  requestAnimationFrame(loop);
+}
+
+// ============================================================
+// INIT
+// ============================================================
+createWorld();
+requestAnimationFrame(ts => { lastTime = ts; requestAnimationFrame(loop); });
+</script>
+</body>
+</html>
