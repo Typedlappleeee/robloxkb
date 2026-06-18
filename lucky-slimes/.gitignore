@@ -1,0 +1,8 @@
+# Fichiers de lieu Roblox (générés en local, pas besoin de les versionner)
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+
+# Sourcemap généré par Rojo
+sourcemap.json
