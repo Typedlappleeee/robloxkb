@@ -1,0 +1,385 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
+<title>🍀 Lucky Slimes — Aperçu</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    font-family: "Fredoka", "Baloo 2", "Comic Sans MS", "Segoe UI", system-ui, sans-serif;
+    background: radial-gradient(120% 120% at 50% 0%, #2a2350 0%, #16142b 55%, #0d0c1a 100%);
+    color: #fff; user-select: none; overflow-x: hidden;
+    display: flex; flex-direction: column; align-items: center;
+    min-height: 100%;
+  }
+  #flash {
+    position: fixed; inset: 0; opacity: 0; pointer-events: none; z-index: 50;
+  }
+  header { width: 100%; max-width: 720px; text-align: center; padding: 14px 12px 0; }
+  h1 { margin: 6px 0 2px; font-size: 30px; letter-spacing: .5px;
+       text-shadow: 0 2px 0 rgba(0,0,0,.35); }
+  .coins {
+    display: inline-block; background: #2b2b46; color: #ffe678; font-size: 26px;
+    padding: 8px 22px; border-radius: 16px; font-weight: 700;
+    box-shadow: 0 3px 0 rgba(0,0,0,.3);
+  }
+  .stats { font-size: 13px; opacity: .8; margin-top: 6px; }
+  main {
+    flex: 1; width: 100%; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; gap: 10px; padding: 12px;
+  }
+  /* ---- carte de révélation ---- */
+  #card {
+    width: 280px; background: rgba(30,30,48,.92); border-radius: 26px;
+    padding: 20px 18px 18px; text-align: center; position: relative;
+    box-shadow: 0 12px 30px rgba(0,0,0,.45);
+  }
+  #card.pop { animation: pop .3s cubic-bezier(.2,1.4,.4,1); }
+  @keyframes pop { 0%{transform:scale(.55)} 100%{transform:scale(1)} }
+  #slime {
+    width: 132px; height: 132px; border-radius: 50%; margin: 8px auto 4px;
+    position: relative; background: #78cd78;
+    box-shadow: inset 0 -10px 18px rgba(0,0,0,.18), 0 6px 14px rgba(0,0,0,.3);
+    transition: background .12s;
+  }
+  #slime.arc {
+    background: linear-gradient(45deg,#ff3b3b,#ffd23b,#4bff6b,#3bd9ff,#5b6bff,#e23bff);
+    background-size: 320% 320%; animation: arc 2s linear infinite;
+  }
+  @keyframes arc { 0%{background-position:0% 50%} 100%{background-position:320% 50%} }
+  .oeil { position: absolute; top: 30%; width: 32px; height: 32px; background:#fff;
+          border-radius: 50%; box-shadow: 0 1px 2px rgba(0,0,0,.2); }
+  .oeil.g { left: 20%; } .oeil.d { right: 20%; }
+  .pupille { position: absolute; width: 14px; height: 14px; background:#15151f;
+             border-radius: 50%; left: 50%; top: 60%; transform: translate(-50%,-50%); }
+  #nom { font-size: 26px; font-weight: 700; margin-top: 8px; min-height: 30px; }
+  #surN { font-size: 14px; opacity: .8; margin-top: 2px; }
+  #val { font-size: 18px; color: #ffe678; margin-top: 6px; }
+  #badge {
+    position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+    background: #ec3270; color:#fff; font-size: 15px; font-weight: 700;
+    padding: 5px 14px; border-radius: 20px; box-shadow: 0 3px 0 rgba(0,0,0,.3);
+    display: none;
+  }
+  /* ---- boutons ---- */
+  .btn {
+    border: none; border-radius: 16px; color: #fff; font-family: inherit;
+    font-weight: 700; cursor: pointer; box-shadow: 0 4px 0 rgba(0,0,0,.32);
+    transition: transform .05s, opacity .15s; padding: 10px 14px;
+  }
+  .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 rgba(0,0,0,.32); }
+  .btn.cd { opacity: .45; pointer-events: none; }
+  .btn.cant { opacity: .5; }
+  #roll { font-size: 30px; padding: 16px 0; width: 280px; background: #4fb05a; }
+  .rangee { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center;
+            width: 100%; max-width: 460px; }
+  .rangee .btn { flex: 1 1 0; min-width: 120px; font-size: 15px; white-space: pre-line; }
+  #chance { background: #46a056; } #vendre { background: #d2a028; }
+  #vitesse { background: #466ec8; } #auto { background: #6b4fb0; }
+  #coll { background: #6b4f9b; font-size: 15px; }
+  .topbtns { position: absolute; top: 14px; right: 12px; display: flex; gap: 8px; }
+  footer { width: 100%; max-width: 720px; display: flex; flex-direction: column;
+           align-items: center; gap: 10px; padding: 0 12px 18px; }
+  .hint { font-size: 13px; opacity: .7; text-align: center; }
+  .hint a { color: #b9a8ff; cursor: pointer; text-decoration: underline; }
+  /* ---- notif ---- */
+  #notif {
+    position: fixed; top: 78px; left: 50%; transform: translateX(-50%);
+    background: #1c8a52; color:#fff; font-weight: 700; padding: 10px 20px;
+    border-radius: 14px; font-size: 17px; opacity: 0; pointer-events: none;
+    transition: opacity .25s; z-index: 60; box-shadow: 0 4px 14px rgba(0,0,0,.4);
+  }
+  #notif.show { opacity: 1; }
+  /* ---- collection ---- */
+  #overlay {
+    position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 40;
+    display: none; align-items: center; justify-content: center;
+  }
+  #overlay.show { display: flex; }
+  #coll-box { background: #20203a; border-radius: 20px; padding: 18px;
+              width: 320px; max-width: 92vw; box-shadow: 0 12px 30px rgba(0,0,0,.5); }
+  #coll-box h2 { margin: 4px 0 12px; text-align: center; }
+  .crow { display: flex; align-items: center; gap: 12px; padding: 7px 4px; font-size: 18px; }
+  .swatch { width: 30px; height: 30px; border-radius: 50%; background:#3c3c50; flex: 0 0 auto; }
+  .crow.lock { opacity: .55; }
+  #close { margin-top: 12px; width: 100%; background: #555; }
+</style>
+</head>
+<body>
+  <div id="flash"></div>
+  <div id="notif"></div>
+
+  <header>
+    <div class="topbtns">
+      <button class="btn" id="coll">📒 Collection</button>
+    </div>
+    <h1>🍀 Lucky Slimes 🌈</h1>
+    <div class="coins">🪙 <span id="pieces">0</span></div>
+    <div class="stats" id="stats"></div>
+  </header>
+
+  <main>
+    <div id="card">
+      <div id="badge">✨ NOUVEAU ✨</div>
+      <div id="slime"><div class="oeil g"><div class="pupille"></div></div><div class="oeil d"><div class="pupille"></div></div></div>
+      <div id="nom">Clique sur ROULER&nbsp;!</div>
+      <div id="surN"></div>
+      <div id="val"></div>
+    </div>
+  </main>
+
+  <footer>
+    <button class="btn" id="roll">🎰 ROULER</button>
+    <div class="rangee">
+      <button class="btn" id="chance">🍀 Chance</button>
+      <button class="btn" id="vendre">💰 VENDRE</button>
+      <button class="btn" id="vitesse">⚡ Vitesse</button>
+    </div>
+    <div class="rangee">
+      <button class="btn" id="auto">🔁 Auto : OFF</button>
+    </div>
+    <div class="hint">
+      Touche <b>R</b> ou <b>Espace</b> pour rouler vite • Aperçu navigateur du jeu Roblox
+      • <a id="reset">🗑️ Remettre à zéro</a>
+    </div>
+  </footer>
+
+  <div id="overlay">
+    <div id="coll-box">
+      <h2>📒 Ma collection</h2>
+      <div id="coll-list"></div>
+      <button class="btn" id="close">Fermer</button>
+    </div>
+  </div>
+
+<script>
+"use strict";
+
+// ====== DONNÉES (identiques à la version Roblox) ======
+// triées du PLUS RARE au PLUS COMMUN
+const RARETES = [
+  { id:"Secret",     nom:"Secret",     emoji:"🌈", rang:6, chance:0.0001, surN:10000, valeur:100000, couleur:"#26262e", arc:true },
+  { id:"Mythique",   nom:"Mythique",   emoji:"🌸", rang:5, chance:0.001,  surN:1000,  valeur:5000,   couleur:"#ff46a5" },
+  { id:"Legendaire", nom:"Légendaire", emoji:"🌟", rang:4, chance:0.004,  surN:250,   valeur:750,    couleur:"#ffaa00" },
+  { id:"Epique",     nom:"Épique",     emoji:"🟣", rang:3, chance:0.02,   surN:50,    valeur:100,    couleur:"#af50ff" },
+  { id:"Rare",       nom:"Rare",       emoji:"🔵", rang:2, chance:0.1,    surN:10,    valeur:25,     couleur:"#3c91ff" },
+  { id:"Commun",     nom:"Commun",     emoji:"🟢", rang:1, chance:1,      surN:1,     valeur:5,      couleur:"#78cd78" },
+];
+const PAR_ID = {};
+RARETES.forEach(s => PAR_ID[s.id] = s);
+
+// ====== CONFIG (identique à Config.luau) ======
+const Config = {
+  cooldown:   v => Math.max(0.05, 0.6 - v * 0.06),
+  multiChance: c => 1 + c * 0.5,
+  coutChance:  n => Math.floor(100 * Math.pow(1.8, n)),
+  coutVitesse: n => Math.floor(120 * Math.pow(1.9, n)),
+};
+
+// ====== SAUVEGARDE (localStorage = marche hors ligne) ======
+const CLE = "luckySlimesSave";
+function defaut() { return { pieces:0, niveauChance:0, niveauVitesse:0, inventaire:{}, decouverts:{} }; }
+let state = defaut();
+try {
+  const brut = localStorage.getItem(CLE);
+  if (brut) state = Object.assign(defaut(), JSON.parse(brut));
+} catch (e) {}
+function save() { try { localStorage.setItem(CLE, JSON.stringify(state)); } catch (e) {} }
+
+// ====== LOGIQUE ======
+function tirer(luck) {
+  for (const s of RARETES) {
+    if (s.id === "Commun") return s;          // filet de sécurité
+    if (Math.random() < s.chance * luck) return s;
+  }
+  return PAR_ID.Commun;
+}
+
+let dernierRoll = 0;
+function rouler() {
+  const now = performance.now() / 1000;
+  if (now - dernierRoll < Config.cooldown(state.niveauVitesse)) return false;
+  dernierRoll = now;
+
+  const s = tirer(Config.multiChance(state.niveauChance));
+  state.inventaire[s.id] = (state.inventaire[s.id] || 0) + 1;
+  const nouveau = !state.decouverts[s.id];
+  if (nouveau) state.decouverts[s.id] = true;
+
+  save();
+  revele(s, nouveau);
+  majUI();
+  return true;
+}
+
+function totalVente() {
+  let t = 0;
+  for (const id in state.inventaire) t += (PAR_ID[id]?.valeur || 0) * state.inventaire[id];
+  return t;
+}
+function vendre() {
+  const t = totalVente();
+  if (t > 0) { state.pieces += t; state.inventaire = {}; notif("💰 +" + fmt(t) + " pièces !"); }
+  else notif("🤷 Rien à vendre. Roule d'abord !");
+  save(); majUI();
+}
+function ameliorer(type) {
+  if (type === "chance") {
+    const c = Config.coutChance(state.niveauChance);
+    if (state.pieces >= c) { state.pieces -= c; state.niveauChance++; notif("🍀 Chance niveau " + state.niveauChance + " !"); }
+    else notif("❌ Pas assez de pièces !");
+  } else {
+    const c = Config.coutVitesse(state.niveauVitesse);
+    if (state.pieces >= c) { state.pieces -= c; state.niveauVitesse++; notif("⚡ Vitesse niveau " + state.niveauVitesse + " !"); }
+    else notif("❌ Pas assez de pièces !");
+  }
+  save(); majUI();
+}
+
+// ====== AFFICHAGE ======
+const $ = id => document.getElementById(id);
+const fmt = n => n.toLocaleString("fr-FR");
+
+function appliquerCouleur(el, s, anime) {
+  if (s.arc) { el.style.background = ""; el.classList.add("arc"); }
+  else { el.classList.remove("arc"); el.style.background = s.couleur; }
+}
+
+function revele(s, nouveau) {
+  appliquerCouleur($("slime"), s, true);
+  $("nom").textContent = s.emoji + " " + s.nom.toUpperCase() + " !";
+  $("nom").style.color = s.arc ? "#fff" : s.couleur;
+  $("surN").textContent = "1 chance sur " + fmt(s.surN);
+  $("val").textContent = "Vaut " + fmt(s.valeur) + " 🪙";
+  $("badge").style.display = nouveau ? "block" : "none";
+
+  // animation pop (on relance l'animation)
+  const c = $("card");
+  c.classList.remove("pop"); void c.offsetWidth; c.classList.add("pop");
+
+  if (s.arc) flashArc();
+  else if (s.rang >= 4) flash(s.couleur, 0.6);
+  else if (s.rang >= 3) flash(s.couleur, 0.35);
+}
+
+function flash(color, force) {
+  const fl = $("flash");
+  fl.style.transition = "none"; fl.style.background = color; fl.style.opacity = force;
+  void fl.offsetWidth;
+  fl.style.transition = "opacity .5s"; fl.style.opacity = "0";
+}
+let arcTimer = null;
+function flashArc() {
+  const fl = $("flash");
+  const cols = ["#ff0000","#ff9600","#ffff00","#00dc3c","#0096ff","#9600ff"];
+  let i = 0; if (arcTimer) clearInterval(arcTimer);
+  fl.style.transition = "none";
+  arcTimer = setInterval(() => {
+    fl.style.background = cols[i % cols.length]; fl.style.opacity = "0.4"; i++;
+    if (i >= cols.length) { clearInterval(arcTimer); arcTimer = null;
+      fl.style.transition = "opacity .5s"; fl.style.opacity = "0"; }
+  }, 110);
+}
+
+let notifTimer = null;
+function notif(txt) {
+  const n = $("notif"); n.textContent = txt; n.classList.add("show");
+  if (notifTimer) clearTimeout(notifTimer);
+  notifTimer = setTimeout(() => n.classList.remove("show"), 2200);
+}
+
+// construit la liste de collection une fois
+const triRang = [...RARETES].sort((a,b) => a.rang - b.rang);
+const lignes = {};
+triRang.forEach(s => {
+  const row = document.createElement("div");
+  row.className = "crow lock";
+  const sw = document.createElement("div"); sw.className = "swatch";
+  const tx = document.createElement("div"); tx.textContent = "??? — 🔒";
+  row.appendChild(sw); row.appendChild(tx);
+  $("coll-list").appendChild(row);
+  lignes[s.id] = { row, sw, tx, s };
+});
+
+function majUI() {
+  $("pieces").textContent = fmt(state.pieces);
+  $("stats").textContent =
+    "Chance ×" + Config.multiChance(state.niveauChance).toFixed(1) +
+    "  •  1 tirage / " + Config.cooldown(state.niveauVitesse).toFixed(2) + "s";
+
+  const t = totalVente();
+  $("vendre").textContent = t > 0 ? ("💰 VENDRE\n+" + fmt(t)) : "💰 VENDRE";
+
+  const cc = Config.coutChance(state.niveauChance);
+  const cv = Config.coutVitesse(state.niveauVitesse);
+  $("chance").textContent = "🍀 Chance Niv." + state.niveauChance + "\n" + fmt(cc) + " 🪙";
+  $("vitesse").textContent = "⚡ Vitesse Niv." + state.niveauVitesse + "\n" + fmt(cv) + " 🪙";
+  $("chance").classList.toggle("cant", state.pieces < cc);
+  $("vitesse").classList.toggle("cant", state.pieces < cv);
+
+  for (const id in lignes) {
+    const L = lignes[id];
+    if (state.decouverts[id]) {
+      L.row.classList.remove("lock");
+      L.sw.style.background = L.s.arc
+        ? "linear-gradient(45deg,#ff3b3b,#ffd23b,#4bff6b,#3bd9ff,#5b6bff,#e23bff)"
+        : L.s.couleur;
+      L.tx.textContent = L.s.emoji + " " + L.s.nom + " — ✅";
+    } else {
+      L.row.classList.add("lock");
+      L.sw.style.background = "#3c3c50";
+      L.tx.textContent = "??? — 🔒";
+    }
+  }
+}
+
+// ====== INTERACTIONS ======
+function doRoll() {
+  if (rouler()) {
+    const b = $("roll");
+    b.classList.add("cd");
+    setTimeout(() => b.classList.remove("cd"), Config.cooldown(state.niveauVitesse) * 1000);
+  }
+}
+$("roll").addEventListener("click", doRoll);
+$("vendre").addEventListener("click", vendre);
+$("chance").addEventListener("click", () => ameliorer("chance"));
+$("vitesse").addEventListener("click", () => ameliorer("vitesse"));
+
+let autoOn = false;
+function autoLoop() {
+  if (!autoOn) return;
+  rouler();
+  setTimeout(autoLoop, Math.max(60, Config.cooldown(state.niveauVitesse) * 1000));
+}
+$("auto").addEventListener("click", () => {
+  autoOn = !autoOn;
+  $("auto").textContent = autoOn ? "🔁 Auto : ON" : "🔁 Auto : OFF";
+  $("auto").style.background = autoOn ? "#9b59b6" : "#6b4fb0";
+  if (autoOn) autoLoop();
+});
+
+$("coll").addEventListener("click", () => $("overlay").classList.add("show"));
+$("close").addEventListener("click", () => $("overlay").classList.remove("show"));
+$("overlay").addEventListener("click", e => { if (e.target.id === "overlay") $("overlay").classList.remove("show"); });
+
+$("reset").addEventListener("click", () => {
+  state = defaut(); save(); autoOn = false;
+  $("auto").textContent = "🔁 Auto : OFF"; $("auto").style.background = "#6b4fb0";
+  $("slime").classList.remove("arc"); $("slime").style.background = "#78cd78";
+  $("nom").textContent = "Clique sur ROULER !"; $("nom").style.color = "#fff";
+  $("surN").textContent = ""; $("val").textContent = ""; $("badge").style.display = "none";
+  majUI(); notif("🗑️ Progression remise à zéro");
+});
+
+document.addEventListener("keydown", e => {
+  if (e.code === "KeyR" || e.code === "Space") { e.preventDefault(); doRoll(); }
+});
+
+majUI();
+</script>
+</body>
+</html>
