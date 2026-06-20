@@ -1,0 +1,44 @@
+name: Build Windows EXE
+
+# Compile macro_recorder.py en un seul .exe Windows et le met a disposition
+# en telechargement (artifact de l'execution + asset de la release "latest").
+
+on:
+  push:
+    branches:
+      - claude/loving-rubin-t48345
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Installer les dependances
+        run: |
+          python -m pip install --upgrade pip
+          pip install pynput pyinstaller
+
+      - name: Compiler l'exe
+        run: pyinstaller --onefile --noconsole --name MacroRecorder --collect-submodules pynput macro_recorder.py
+
+      - name: Publier l'artifact (telechargeable depuis l'onglet Actions)
+        uses: actions/upload-artifact@v4
+        with:
+          name: MacroRecorder-windows
+          path: dist/MacroRecorder.exe
+
+      - name: Publier sur la release "latest" (lien de telechargement direct)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: Derniere version
+          files: dist/MacroRecorder.exe
