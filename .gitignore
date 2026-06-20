@@ -5,3 +5,4 @@ __pycache__/
 # Données générées à l'exécution
 macros/
 autobuy_points.json
+autobuy_routine.json
