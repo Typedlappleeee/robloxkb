@@ -29,11 +29,11 @@ if not defined PYCMD (
 echo Python detecte : %PYCMD%
 echo.
 
-REM --- Verifie / installe pynput ---
-%PYCMD% -c "import pynput" >nul 2>&1
+REM --- Verifie / installe les dependances ---
+%PYCMD% -c "import pynput, cv2, numpy, mss" >nul 2>&1
 if errorlevel 1 (
-    echo Installation de la dependance "pynput"...
-    %PYCMD% -m pip install pynput
+    echo Installation des dependances...
+    %PYCMD% -m pip install -r "%~dp0requirements.txt"
     echo.
 )
 

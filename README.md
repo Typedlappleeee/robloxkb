@@ -48,40 +48,41 @@ Tous les raccourcis sont reconfigurables dans chaque onglet (bouton **Changer**)
 
 Les macros sont sauvegardées en `.json` dans le dossier `macros/`. Tu peux les recharger plus tard.
 
-## Auto-Achat (boutique qui restock)
+## Auto-Achat (boutique qui restock) — 100% automatique
 
-Pour racheter une boutique à chaque restock (ex. la boutique de graines :
-Carotte, Fraise, Myrtille…) sans rester devant l'écran. Tu **enregistres ta
-routine d'achat une seule fois** — y compris les clics en deux étapes
-(item → **Acheter**) et les **scrolls** pour atteindre les articles plus bas —
-et le script la rejoue automatiquement à chaque restock.
+Rachète une boutique à chaque restock (ex. la boutique de graines : Carotte,
+Fraise, Myrtille…) **sans rien enregistrer**. L'outil **repère à l'écran** les
+articles (cases sombres) et le **bouton d'achat doré**, puis clique dessus et
+scrolle, automatiquement, à chaque restock.
 
-**Mise en place (une seule fois) :**
+**Utilisation :**
 
 1. Ouvre la boutique dans Roblox pour qu'elle reste affichée.
-2. Va dans l'onglet **Auto-Achat** et clique **Enregistrer la routine**
-   (ou appuie sur **`F3`**).
-3. Dans Roblox, fais tes achats normalement : clique un article, clique
-   **Acheter**, scrolle vers le bas, achète les suivants, etc.
-4. Reviens et clique **Arrêter l'enreg.** (ou **`F3`** à nouveau).
-5. Clique **Démarrer auto-achat** (ou **`F8`**). Le script rejoue ta routine,
-   attend, puis recommence à chaque restock.
-
-> Astuce : pendant un article en stock `x5`, clique 5 fois sur item → Acheter
-> pour tout rafler. Les clics « en trop » quand le stock est vide ne font rien.
+2. Onglet **Auto-Achat** → clique **Tester la détection** (ou **`F3`**). Une
+   image s'ouvre : **cadres verts** = articles repérés, **cercle orange** =
+   bouton d'achat. Appuie sur une touche pour fermer.
+3. Si la détection est bonne, clique **Démarrer auto-achat** (ou **`F8`**).
+   Sinon, ajuste les deux curseurs (voir ci-dessous) et re-teste.
 
 **Paramètres :**
 
 | Réglage | Rôle | Défaut |
 |---|---|---|
-| Intervalle restock (s) | temps d'attente entre deux passes | `60` |
-| Délai entre actions (ms) | pause entre chaque clic/scroll rejoué (laisse le temps au popup « Acheter » d'apparaître) | `400` |
+| Intervalle restock (s) | attente entre deux passes | `60` |
+| Délai entre clics (ms) | pause entre chaque clic (laisse le temps au jeu de réagir) | `250` |
+| Scrolls par passe | nombre de scrolls pour descendre la liste | `4` |
+| Sensibilité articles | si des articles ne sont pas détectés, monte/baisse ce curseur | — |
+| Tolérance bouton doré | élargit la couleur reconnue comme « bouton d'achat » | — |
 
 > Restock toutes les 5 min → laisse l'intervalle à **60 s** : ça repasse au moins
 > une fois par minute, donc aucun restock n'est manqué.
 
-Les clics faits **sur la fenêtre de l'outil** pendant l'enregistrement sont
-ignorés automatiquement (seuls comptent tes clics dans Roblox). La routine est
-mémorisée dans `autobuy_routine.json` et rechargée au prochain lancement. Garde
-la boutique ouverte et la fenêtre Roblox **à la même position**, sinon les
-coordonnées enregistrées ne correspondent plus.
+**À savoir :**
+
+- Garde la boutique Roblox **ouverte et à la même place** (l'outil clique sur des
+  positions à l'écran).
+- Mets la **fenêtre de l'outil à l'écart de la boutique** : sinon les clics
+  automatiques risquent de tomber sur l'outil au lieu du jeu.
+- Idéalement **zoom d'affichage Windows à 100%** (sinon léger décalage possible).
+- C'est de la détection visuelle : selon le jeu / la résolution, un petit
+  réglage des deux curseurs via **Tester la détection** peut être nécessaire.
