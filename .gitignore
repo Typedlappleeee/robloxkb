@@ -1,0 +1,7 @@
+# Python
+__pycache__/
+*.py[cod]
+
+# Données générées à l'exécution
+macros/
+autobuy_points.json

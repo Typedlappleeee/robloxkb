@@ -33,6 +33,15 @@ ac_stop        = threading.Event()
 ac_thread      = None
 ac_click_count = 0
 
+# ─── Auto-achat state ────────────────────────────────────────────────────────
+
+ab_points   = []                 # liste de (x, y) = boutons d'achat capturés
+ab_running  = False
+ab_stop     = threading.Event()
+ab_thread   = None
+
+POINTS_FILE = os.path.join(os.path.dirname(__file__), "autobuy_points.json")
+
 # ─── Hotkeys ─────────────────────────────────────────────────────────────────
 
 hotkeys = {
@@ -41,6 +50,8 @@ hotkeys = {
     "play_start": Key.f5,
     "play_stop":  Key.f6,
     "ac_toggle":  Key.f7,
+    "ab_toggle":  Key.f8,
+    "ab_capture": Key.f3,
 }
 listening_for = None
 
@@ -101,6 +112,12 @@ def on_key_press(key):
         return
     if _keq(key, hotkeys["ac_toggle"]):
         if app_ref: app_ref.after(0, app_ref._ac_toggle)
+        return
+    if _keq(key, hotkeys["ab_toggle"]):
+        if app_ref: app_ref.after(0, app_ref._ab_toggle)
+        return
+    if _keq(key, hotkeys["ab_capture"]):
+        if app_ref: app_ref.after(0, app_ref._ab_capture_point)
         return
 
     if mac_recording:
@@ -193,6 +210,46 @@ def _ac_loop(btn_name, double, interval_ms, count_var, status_var):
     status_var.set("Autoclicker arrete")
     ac_running = False
 
+# ─── Auto-achat loop ──────────────────────────────────────────────────────────
+
+def _ab_loop(points, clicks_per_item, click_delay_ms, interval_s,
+             status_var, next_var, bought_var):
+    global ab_running
+
+    def ui(fn):                       # màj tkinter depuis le thread => via after()
+        if app_ref:
+            app_ref.after(0, fn)
+
+    total = 0
+    cd = click_delay_ms / 1000
+    while not ab_stop.is_set():
+        # ── Une passe d'achat : reclique chaque bouton capturé ──────────────
+        ui(lambda: status_var.set("Achat en cours..."))
+        ui(lambda: next_var.set("Prochaine passe dans : -"))
+        for (x, y) in points:
+            if ab_stop.is_set():
+                break
+            for _ in range(clicks_per_item):
+                if ab_stop.is_set():
+                    break
+                mouse_ctrl.position = (x, y)
+                mouse_ctrl.click(Button.left, 1)
+                total += 1
+                ui(lambda c=total: bought_var.set(f"Clics d'achat : {c}"))
+                time.sleep(cd)
+        if ab_stop.is_set():
+            break
+        # ── Attente jusqu'au prochain restock ───────────────────────────────
+        ui(lambda: status_var.set("En attente du prochain restock..."))
+        remaining = interval_s
+        while remaining > 0 and not ab_stop.is_set():
+            ui(lambda r=remaining: next_var.set(f"Prochaine passe dans : {r}s"))
+            time.sleep(1)
+            remaining -= 1
+    ui(lambda: status_var.set("Auto-achat arrete"))
+    ui(lambda: next_var.set("Prochaine passe dans : -"))
+    ab_running = False
+
 # ─── GUI ─────────────────────────────────────────────────────────────────────
 
 BG     = "#1e1e2e"
@@ -222,6 +279,7 @@ class App(tk.Tk):
         self.configure(bg=BG)
         self._hk_vars  = {}
         self._hk_btns  = {}
+        self._ab_load_points()
         self._build()
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
@@ -247,11 +305,14 @@ class App(tk.Tk):
 
         tab_mac = tk.Frame(nb, bg=BG)
         tab_ac  = tk.Frame(nb, bg=BG)
+        tab_ab  = tk.Frame(nb, bg=BG)
         nb.add(tab_mac, text="  Macro  ")
         nb.add(tab_ac,  text="  Autoclicker  ")
+        nb.add(tab_ab,  text="  Auto-Achat  ")
 
         self._build_macro(tab_mac)
         self._build_ac(tab_ac)
+        self._build_ab(tab_ab)
         self._build_hotkeys()
 
         tk.Label(self, text="Raccourcis globaux actifs meme quand Roblox est en avant-plan",
@@ -448,6 +509,109 @@ class App(tk.Tk):
         hk.pack(fill="x", padx=10, pady=(4, 8))
         self._hk_row(hk, 0, "ac_toggle", "Toggle (marche/arrete)")
 
+    # ── Onglet Auto-Achat ─────────────────────────────────────────────────────
+
+    def _build_ab(self, parent):
+        PAD = {"padx": 10, "pady": 6}
+
+        self.ab_status = tk.StringVar(value="Auto-achat arrete")
+        tk.Label(parent, textvariable=self.ab_status, bg=BG2, fg="#a6adc8",
+                 font=("Segoe UI", 9), width=52, anchor="w",
+                 padx=10, pady=4).pack(fill="x", padx=0, pady=(8, 2))
+
+        tk.Label(parent,
+                 text="Ouvre la boutique, capture chaque bouton d'achat, puis le "
+                      "script reclique dessus a chaque restock.",
+                 bg=BG, fg=MUTED, font=("Segoe UI", 8), wraplength=430,
+                 justify="left").pack(pady=(2, 4), padx=10, anchor="w")
+
+        # Liste des points capturés
+        list_frame = tk.Frame(parent, bg=BG)
+        list_frame.pack(fill="x", padx=10, pady=4)
+        tk.Label(list_frame, text="Boutons d'achat captures :", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).pack(anchor="w")
+        inner = tk.Frame(list_frame, bg=BG)
+        inner.pack(fill="x")
+        self.ab_listbox = tk.Listbox(inner, height=5, bg=PANEL, fg=FG,
+                                     selectbackground=PURPLE, selectforeground=BG,
+                                     relief="flat", highlightthickness=0,
+                                     font=("Consolas", 9))
+        self.ab_listbox.pack(side="left", fill="x", expand=True)
+        sb = tk.Scrollbar(inner, command=self.ab_listbox.yview)
+        sb.pack(side="right", fill="y")
+        self.ab_listbox.config(yscrollcommand=sb.set)
+
+        # Boutons capture / suppression
+        cap_f = tk.Frame(parent, bg=BG)
+        cap_f.pack(**PAD)
+        sm = dict(BTN_BASE, width=12, height=1)
+        tk.Button(cap_f, text="Capturer (3s)", command=self._ab_capture_countdown,
+                  **{**sm, "bg": GREEN, "fg": BG,
+                     "activebackground": "#7ec77e"}).pack(side="left", padx=3)
+        tk.Button(cap_f, text="Supprimer", command=self._ab_remove_point,
+                  **sm).pack(side="left", padx=3)
+        tk.Button(cap_f, text="Tout effacer", command=self._ab_clear_points,
+                  **{**sm, "bg": RED_C, "fg": BG}).pack(side="left", padx=3)
+
+        # Paramètres
+        opts = tk.LabelFrame(parent, text="Parametres", bg=BG, fg=FG,
+                             font=("Segoe UI", 9), bd=1, relief="solid",
+                             padx=14, pady=8)
+        opts.pack(fill="x", padx=10, pady=4)
+
+        tk.Label(opts, text="Intervalle restock (s) :", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w", pady=4)
+        self.ab_interval = tk.IntVar(value=60)
+        tk.Spinbox(opts, from_=5, to=600, increment=5, textvariable=self.ab_interval,
+                   width=6, bg=PANEL, fg=FG, buttonbackground=HOVER,
+                   relief="flat").grid(row=0, column=1, sticky="w", padx=8)
+
+        tk.Label(opts, text="Clics par article :", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w", pady=4)
+        self.ab_clicks = tk.IntVar(value=10)
+        tk.Spinbox(opts, from_=1, to=99, textvariable=self.ab_clicks,
+                   width=6, bg=PANEL, fg=FG, buttonbackground=HOVER,
+                   relief="flat").grid(row=1, column=1, sticky="w", padx=8)
+
+        tk.Label(opts, text="Delai entre clics (ms) :", bg=BG, fg=FG,
+                 font=("Segoe UI", 9)).grid(row=2, column=0, sticky="w", pady=4)
+        self.ab_click_delay = tk.IntVar(value=150)
+        tk.Spinbox(opts, from_=20, to=2000, increment=10,
+                   textvariable=self.ab_click_delay, width=6,
+                   bg=PANEL, fg=FG, buttonbackground=HOVER,
+                   relief="flat").grid(row=2, column=1, sticky="w", padx=8)
+
+        self.ab_next = tk.StringVar(value="Prochaine passe dans : -")
+        tk.Label(parent, textvariable=self.ab_next, bg=BG, fg=BLUE_C,
+                 font=("Segoe UI", 9, "bold")).pack(pady=(4, 0))
+        self.ab_bought = tk.StringVar(value="Clics d'achat : 0")
+        tk.Label(parent, textvariable=self.ab_bought, bg=BG, fg=MUTED,
+                 font=("Segoe UI", 9)).pack(pady=(0, 2))
+
+        # Start / stop
+        frm = tk.Frame(parent, bg=BG)
+        frm.pack(**PAD)
+        self.btn_ab_start = tk.Button(frm, text="Demarrer auto-achat",
+                                      command=self._ab_start,
+                                      **{**BTN_BASE, "bg": GREEN, "fg": BG,
+                                         "activebackground": "#7ec77e"})
+        self.btn_ab_start.pack(side="left", padx=4)
+        self.btn_ab_stop = tk.Button(frm, text="Stopper auto-achat",
+                                     command=self._ab_stop,
+                                     **{**BTN_BASE, "bg": RED_C, "fg": BG,
+                                        "activebackground": "#c96e86"},
+                                     state="disabled")
+        self.btn_ab_stop.pack(side="left", padx=4)
+
+        # Raccourcis auto-achat
+        hk = tk.LabelFrame(parent, text="Raccourcis auto-achat", bg=BG, fg=PURPLE,
+                           font=("Segoe UI", 9), bd=1, relief="solid", padx=8, pady=4)
+        hk.pack(fill="x", padx=10, pady=(4, 8))
+        self._hk_row(hk, 0, "ab_toggle",  "Toggle (marche/arrete)")
+        self._hk_row(hk, 1, "ab_capture", "Capturer un point")
+
+        self._ab_refresh_list()
+
     # ── Section raccourcis commune ────────────────────────────────────────────
 
     def _build_hotkeys(self):
@@ -533,6 +697,109 @@ class App(tk.Tk):
         else:
             self.btn_ac_start.config(state="normal")
             self.btn_ac_stop.config(state="disabled")
+
+    # ── Auto-achat helpers ────────────────────────────────────────────────────
+
+    def _ab_refresh_list(self):
+        self.ab_listbox.delete(0, "end")
+        for i, (x, y) in enumerate(ab_points, 1):
+            self.ab_listbox.insert("end", f"  {i}.   x = {x:<5}   y = {y}")
+
+    def _ab_capture_point(self):
+        if ab_running:
+            return
+        x, y = mouse_ctrl.position
+        ab_points.append((int(x), int(y)))
+        self._ab_refresh_list()
+        self._ab_save_points()
+        self.ab_status.set(
+            f"Point capture : x={int(x)} y={int(y)}  ({len(ab_points)} au total)")
+
+    def _ab_capture_countdown(self, n=3):
+        if ab_running:
+            return
+        if n > 0:
+            self.ab_status.set(
+                f"Capture dans {n}s — place la souris sur le bouton d'achat...")
+            self.after(1000, lambda: self._ab_capture_countdown(n - 1))
+        else:
+            self._ab_capture_point()
+
+    def _ab_remove_point(self):
+        sel = self.ab_listbox.curselection()
+        if not sel:
+            return
+        idx = sel[0]
+        if 0 <= idx < len(ab_points):
+            ab_points.pop(idx)
+            self._ab_refresh_list()
+            self._ab_save_points()
+
+    def _ab_clear_points(self):
+        if ab_points and messagebox.askyesno("Effacer", "Supprimer tous les boutons captures ?"):
+            ab_points.clear()
+            self._ab_refresh_list()
+            self._ab_save_points()
+
+    def _ab_save_points(self):
+        try:
+            with open(POINTS_FILE, "w") as f:
+                json.dump(ab_points, f)
+        except OSError:
+            pass
+
+    def _ab_load_points(self):
+        global ab_points
+        if os.path.exists(POINTS_FILE):
+            try:
+                with open(POINTS_FILE) as f:
+                    ab_points = [tuple(p) for p in json.load(f)]
+            except (OSError, ValueError):
+                ab_points = []
+
+    def _ab_toggle(self):
+        if ab_running:
+            self._ab_stop()
+        else:
+            self._ab_start()
+
+    def _ab_start(self):
+        global ab_running, ab_thread
+        if ab_running:
+            return
+        if not ab_points:
+            messagebox.showwarning(
+                "Aucun point",
+                "Capture d'abord les boutons d'achat.\n\n"
+                "Place la souris sur un bouton dans Roblox puis appuie sur "
+                f"{_key_name(hotkeys['ab_capture'])} (ou le bouton « Capturer »).")
+            return
+        ab_stop.clear()
+        ab_running = True
+        self.btn_ab_start.config(state="disabled")
+        self.btn_ab_stop.config(state="normal")
+        self.ab_status.set("Auto-achat actif...")
+        ab_thread = threading.Thread(
+            target=_ab_loop,
+            args=(list(ab_points), self.ab_clicks.get(),
+                  self.ab_click_delay.get(), self.ab_interval.get(),
+                  self.ab_status, self.ab_next, self.ab_bought),
+            daemon=True,
+        )
+        ab_thread.start()
+        self.after(300, self._ab_check_done)
+
+    def _ab_stop(self):
+        ab_stop.set()
+        self.btn_ab_start.config(state="normal")
+        self.btn_ab_stop.config(state="disabled")
+
+    def _ab_check_done(self):
+        if ab_running:
+            self.after(300, self._ab_check_done)
+        else:
+            self.btn_ab_start.config(state="normal")
+            self.btn_ab_stop.config(state="disabled")
 
     # ── Macro actions ─────────────────────────────────────────────────────────
 
@@ -625,6 +892,7 @@ class App(tk.Tk):
     def _on_close(self):
         mac_stop.set()
         ac_stop.set()
+        ab_stop.set()
         mouse_listener.stop()
         kb_listener.stop()
         self.destroy()
